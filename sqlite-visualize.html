@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>SQLite Visualizer</title>
+    <title>SQLite Physical Visualizer</title>
     <meta charset="UTF-8">
     <style>
         body { font-family: sans-serif; margin: 15px;}
@@ -41,11 +41,25 @@
             border: 1px solid #aaa;
             vertical-align: middle;
         }
+        /* Make legend terms clickable */
+        .legend-term {
+            cursor: pointer;
+            text-decoration: underline;
+            text-decoration-style: dotted;
+            text-decoration-color: #555;
+            margin-left: 3px; /* Small space after color box */
+        }
+        .legend-term:hover {
+            color: blue;
+            text-decoration-color: blue;
+        }
 
         .page { /* Page map box styles */
             display: inline-block;
             height: 100%;
-            border-right: 1px solid #ddd;
+            /* Base border - hover/selected changes this */
+            border: 1px solid #ddd;
+            border-right-color: #eee; /* Keep subtle visual separator */
             box-sizing: border-box;
             cursor: pointer;
             font-size: 9px;
@@ -56,18 +70,22 @@
             color: #555;
             font-weight: bold;
         }
+        /* This border setup might cause bottom border clipping on selected */
         .page:hover {
-            border: 1px solid black;
+            border: 1px solid black; /* Consistent 1px border on hover */
             z-index: 10;
             filter: brightness(1.1);
         }
         .page.selected {
-            border: 2px solid black;
+            border: 2px solid black; /* Thicker border for selected */
+            /* Use outline for extra emphasis without affecting layout as much */
             outline: 1px solid orange;
+            outline-offset: -2px; /* Draw outline slightly inside */
             filter: brightness(1.2);
+            z-index: 20; /* Ensure selected is topmost */
         }
 
-        /* --- Page Type Colors (ensure these match CSS below) --- */
+        /* --- Page Type Colors (Applied to page map and legend) --- */
         .page-table-internal, .legend-table-internal { background-color: #87CEFA; color: #005; }
         .page-index-internal, .legend-index-internal { background-color: #ADD8E6; color: #005;}
         .page-table-leaf, .legend-table-leaf { background-color: #90EE90; color: #050; }
@@ -76,33 +94,59 @@
         .page-freelist-trunk, .legend-freelist-trunk { background-color: #FFD700; color: #640; }
         .page-freelist-leaf, .legend-freelist-leaf { background-color: #FFFFE0; color: #660; }
         .page-unknown, .legend-unknown { background-color: #D3D3D3; color: #333; }
+        /* Add a default background for .page if needed, placed before specific types */
+/*        .page { background-color: #D3D3D3; }*/
 
         /* SVG for links */
         #linkOverlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 5; }
         #linkOverlay line { stroke-width: 1.5; }
         #linkOverlay line title { pointer-events: auto; }
 
-        /* --- Dialog Box Styles --- */
+        /* --- Dialog Box Styles (Shared visual style) --- */
         .dialog-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.6); z-index: 999; }
-        .dialog-box { display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 80%; max-width: 900px; max-height: 85vh; background-color: #fff; border-radius: 8px; box-shadow: 0 5px 15px rgba(0,0,0,0.3); z-index: 1000; overflow: hidden; }
+        .dialog-box { display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 80%; max-height: 85vh; background-color: #fff; border-radius: 8px; box-shadow: 0 5px 15px rgba(0,0,0,0.3); z-index: 1000; overflow: hidden; }
         .dialog-header { display: flex; justify-content: space-between; align-items: center; padding: 10px 20px; background-color: #f0f0f0; border-bottom: 1px solid #ccc; border-top-left-radius: 8px; border-top-right-radius: 8px; }
         .dialog-header h2 { margin: 0; border: none; font-size: 1.2em; }
         .dialog-close-btn { background: none; border: none; font-size: 1.8em; line-height: 1; cursor: pointer; padding: 0 5px; color: #555; }
         .dialog-close-btn:hover { color: #000; }
-        .dialog-content { padding: 15px 20px; overflow-y: auto; max-height: calc(85vh - 60px); font-family: monospace; font-size: 0.9em; line-height: 1.4; }
-        body.dialog-visible .dialog-overlay, body.dialog-visible .dialog-box { display: block; }
+        .dialog-content { padding: 15px 20px; overflow-y: auto; max-height: calc(85vh - 60px); /* Adjust based on header height */ font-family: monospace; font-size: 0.9em; line-height: 1.4; }
 
-        /* --- Styles for content inside dialog --- */
-        .dialog-content h3 { margin-top: 15px; margin-bottom: 8px; border-bottom: 1px solid #eee; padding-bottom: 3px; font-size: 1.1em; }
-        .dialog-content dl { margin-left: 5px; margin-bottom: 15px; } /* Indent definition lists */
-        .dialog-content dt { font-weight: bold; color: #333; float: left; width: 200px; /* Fixed width for terms */ clear: left; margin-bottom: 5px; padding-right: 10px; }
-        .dialog-content dd { margin-left: 210px; /* Match dt width + padding */ margin-bottom: 5px; word-wrap: break-word; /* Wrap long values */ }
-        .dialog-content pre { margin: 0 0 10px 0; padding: 10px; background-color: #eee; border: 1px dashed #ccc; border-radius: 4px; overflow-x: auto; white-space: pre-wrap; word-wrap: break-word; }
-        .dialog-content .cell-detail-item { margin-bottom: 10px; padding-bottom: 10px; border-bottom: 1px dotted #ddd; }
-        .dialog-content .cell-detail-item:last-child { border-bottom: none; }
-        .dialog-content .data-dump { margin-top: 5px; padding-left: 15px; font-size: 0.9em; color: #444; white-space: pre; overflow-x: auto; }
-        .dialog-content .dump-content-container { margin-bottom: 5px; }
-        .dialog-content .show-more-btn { display: block; margin-left: 20px; margin-top: 3px; margin-bottom: 8px; padding: 2px 6px; font-size: 0.8em; cursor: pointer; font-family: sans-serif; }
+        /* --- Styles specific to Page Detail Dialog --- */
+        #pageDetailDialog { max-width: 900px; } /* Wider dialog for page details */
+        #pageDetailDialog .dialog-content h3 { margin-top: 15px; margin-bottom: 8px; border-bottom: 1px solid #eee; padding-bottom: 3px; font-size: 1.1em; }
+        #pageDetailDialog .dialog-content dl { margin-left: 5px; margin-bottom: 15px; }
+        #pageDetailDialog .dialog-content dt { font-weight: bold; color: #333; float: left; width: 200px; clear: left; margin-bottom: 5px; padding-right: 10px; }
+        #pageDetailDialog .dialog-content dd { margin-left: 210px; margin-bottom: 5px; word-wrap: break-word; }
+        #pageDetailDialog .dialog-content dl::after { content: ""; display: table; clear: both; }
+        #pageDetailDialog .dialog-content pre { margin: 0 0 10px 0; padding: 10px; background-color: #eee; border: 1px dashed #ccc; border-radius: 4px; overflow-x: auto; white-space: pre-wrap; word-wrap: break-word; }
+        #pageDetailDialog .dialog-content .cell-detail-item { margin-bottom: 10px; padding-bottom: 10px; border-bottom: 1px dotted #ddd; }
+        #pageDetailDialog .dialog-content .cell-detail-item:last-child { border-bottom: none; }
+        #pageDetailDialog .dialog-content .data-dump { margin-top: 5px; padding-left: 15px; font-size: 0.9em; color: #444; white-space: pre; overflow-x: auto; }
+        #pageDetailDialog .dialog-content .dump-content-container { margin-bottom: 5px; }
+        #pageDetailDialog .dialog-content .show-more-btn { display: block; margin-left: 20px; margin-top: 3px; margin-bottom: 8px; padding: 2px 6px; font-size: 0.8em; cursor: pointer; font-family: sans-serif; }
+
+        /* --- Styles specific to Legend Help Dialog --- */
+         .legend-help-dialog { max-width: 600px; max-height: 70vh; }
+         .legend-help-dialog .dialog-content { font-family: sans-serif; font-size: 0.95em; }
+         .legend-help-dialog .dialog-content p { margin-bottom: 10px; line-height: 1.6; }
+         .legend-help-dialog .dialog-content code,
+         .legend-help-dialog .dialog-content pre { background-color: #eee; padding: 2px 5px; border-radius: 3px; font-family: monospace; font-size: 0.95em; }
+         .legend-help-dialog .dialog-content pre { display: block; margin-top: 5px; padding: 10px; white-space: pre-wrap; word-wrap: break-word; }
+
+        /* --- Visibility Control for Dialogs --- */
+        /* Use separate overlays logically, even if visually identical */
+        body.dialog-visible #pageDetailOverlay,
+        body.dialog-visible #pageDetailDialog { display: block; }
+
+        body.legend-dialog-visible #legendHelpOverlay,
+        body.legend-dialog-visible #legendHelpDialog { display: block; }
+
+        /* Ensure only one dialog type is visible */
+        body.legend-dialog-visible #pageDetailDialog,
+        body.legend-dialog-visible #pageDetailOverlay { display: none; }
+        body.dialog-visible #legendHelpDialog,
+        body.dialog-visible #legendHelpOverlay { display: none; }
+
     </style>
 </head>
 <body>
@@ -118,31 +162,67 @@
 
     <h2>Page Map</h2>
     <p>(Colors indicate page type. Click a page for details.)</p>
-    <!-- Legend Added Here -->
+    <!-- Legend -->
     <div id="pageMapLegend">
-         <div class="legend-item"><span class="legend-color-box legend-table-leaf"></span>Table Leaf</div>
-         <div class="legend-item"><span class="legend-color-box legend-index-leaf"></span>Index Leaf</div>
-         <div class="legend-item"><span class="legend-color-box legend-table-internal"></span>Table Internal</div>
-         <div class="legend-item"><span class="legend-color-box legend-index-internal"></span>Index Internal</div>
-         <div class="legend-item"><span class="legend-color-box legend-overflow"></span>Overflow</div>
-         <div class="legend-item"><span class="legend-color-box legend-freelist-trunk"></span>Freelist Trunk</div>
-         <div class="legend-item"><span class="legend-color-box legend-freelist-leaf"></span>Freelist Leaf</div>
-         <div class="legend-item"><span class="legend-color-box legend-unknown"></span>Unknown/Other</div>
+         <div class="legend-item">
+             <span class="legend-color-box legend-table-leaf"></span>
+             <span class="legend-term" data-term="table-leaf">Table Leaf</span>
+         </div>
+         <div class="legend-item">
+             <span class="legend-color-box legend-index-leaf"></span>
+             <span class="legend-term" data-term="index-leaf">Index Leaf</span>
+         </div>
+         <div class="legend-item">
+            <span class="legend-color-box legend-table-internal"></span>
+            <span class="legend-term" data-term="table-internal">Table Internal</span>
+         </div>
+         <div class="legend-item">
+            <span class="legend-color-box legend-index-internal"></span>
+            <span class="legend-term" data-term="index-internal">Index Internal</span>
+         </div>
+         <div class="legend-item">
+            <span class="legend-color-box legend-overflow"></span>
+            <span class="legend-term" data-term="overflow">Overflow</span>
+         </div>
+         <div class="legend-item">
+            <span class="legend-color-box legend-freelist-trunk"></span>
+            <span class="legend-term" data-term="freelist-trunk">Freelist Trunk</span>
+         </div>
+         <div class="legend-item">
+            <span class="legend-color-box legend-freelist-leaf"></span>
+            <span class="legend-term" data-term="freelist-leaf">Freelist Leaf</span>
+         </div>
+         <div class="legend-item">
+            <span class="legend-color-box legend-unknown"></span>
+            <span class="legend-term" data-term="unknown">Unknown/Other</span>
+         </div>
     </div>
     <div id="pageMapContainer">
         <svg id="linkOverlay" width="100%" height="100%"></svg>
         <div id="pageMap"></div>
     </div>
 
-    <!-- Dialog Structure -->
-    <div id="dialogOverlay" class="dialog-overlay"></div>
+    <!-- Page Detail Dialog Structure -->
+    <div id="pageDetailOverlay" class="dialog-overlay"></div>
     <div id="pageDetailDialog" class="dialog-box">
         <div class="dialog-header">
-            <h2 id="dialogTitle">Page Details</h2>
-            <button id="dialogCloseBtn" class="dialog-close-btn" aria-label="Close dialog">×</button>
+            <h2 id="pageDetailTitle">Page Details</h2> <!-- Specific ID -->
+            <button id="pageDetailCloseBtn" class="dialog-close-btn" aria-label="Close page details">×</button>
         </div>
-        <div id="dialogContent" class="dialog-content">
+        <div id="pageDetailContent" class="dialog-content">
             <p>Loading...</p>
+        </div>
+    </div>
+
+    <!-- Legend Help Dialog Structure -->
+    <div id="legendHelpOverlay" class="dialog-overlay"></div>
+    <div id="legendHelpDialog" class="dialog-box legend-help-dialog">
+        <div class="dialog-header">
+            <h2 id="legendHelpTitle">Legend Explanation</h2>
+            <button id="legendHelpCloseBtn" class="dialog-close-btn" aria-label="Close legend help">×</button>
+        </div>
+        <div id="legendHelpContent" class="dialog-content">
+            <!-- Explanation will be injected here -->
         </div>
     </div>
 
@@ -154,23 +234,56 @@
         const pageMapDiv = document.getElementById('pageMap');
         const pageMapContainer = document.getElementById('pageMapContainer');
         const linkOverlay = document.getElementById('linkOverlay');
-        const dialogOverlay = document.getElementById('dialogOverlay');
+        // Page Detail Dialog elements
+        const pageDetailOverlay = document.getElementById('pageDetailOverlay');
         const pageDetailDialog = document.getElementById('pageDetailDialog');
-        const dialogTitle = document.getElementById('dialogTitle');
-        const dialogContent = document.getElementById('dialogContent');
-        const dialogCloseBtn = document.getElementById('dialogCloseBtn');
+        const pageDetailTitle = document.getElementById('pageDetailTitle'); // Use correct ID
+        const pageDetailContent = document.getElementById('pageDetailContent'); // Use correct ID
+        const pageDetailCloseBtn = document.getElementById('pageDetailCloseBtn'); // Use correct ID
+        // Legend Help Dialog elements
+        const legendHelpOverlay = document.getElementById('legendHelpOverlay');
+        const legendHelpDialog = document.getElementById('legendHelpDialog');
+        const legendHelpTitle = document.getElementById('legendHelpTitle');
+        const legendHelpContent = document.getElementById('legendHelpContent');
+        const legendHelpCloseBtn = document.getElementById('legendHelpCloseBtn');
+        const pageMapLegend = document.getElementById('pageMapLegend');
+
 
         // --- Global State ---
         let pageData = [];
         let pageSize = 0;
         let fileBuffer = null;
         let fileHeaderInfo = {};
-        const DUMP_LENGTH = 32; // Initial number of bytes for hex dump
+        const DUMP_LENGTH = 32;
+
+        // --- Legend Explanations Content ---
+        const legendExplanations = {
+            'table-leaf': { title: 'Table Leaf Page', explanation: 'Holds the actual data for table rows. When SQLite retrieves a row using its unique RowID (usually the primary key), it navigates the B-tree to land on one of these pages.', example: 'Imagine a phone book. This page contains the full entry for someone: \nName: Alice Smith, Phone: 555-1234, Address: 123 Main St.\nThe cell details would show something like:\n<code>Payload Size: 55, RowID: 101</code>' },
+            'index-leaf': { title: 'Index Leaf Page', explanation: 'Holds the final entries for an index. It contains the indexed value(s) and points back to the RowID(s) of the actual data row(s) in the table leaf pages.', example: 'Think of the index at the back of a book. This page might contain entries like:\nKey: "Smith", points to -> RowIDs [101, 234, 567]\nKey: "Jones", points to -> RowIDs [89, 444]\nThe cell details would show something like:\n<code>Payload Size: 5, Key Data @ 4050 (containing "Smith")</code>' },
+            'table-internal': { title: 'Table Internal Page', explanation: 'Acts like a signpost within the main table\'s B-tree structure. It doesn\'t hold row data itself, but contains RowIDs (keys) that guide the search towards the correct leaf page based on the RowID being sought.', example: 'Imagine navigating a large library by aisle numbers. This page might say:\n"RowIDs < 500: Go Left (to Page 10)"\n"RowIDs >= 500: Go Right (to Page 12)"\nThe cell details would show:\n<code>Left Child -> pg 10, Key (RowID): 500</code>' },
+            'index-internal': { title: 'Index Internal Page', explanation: 'Acts like a signpost within an index\'s B-tree structure. It contains indexed values (keys) that guide the search towards the correct index leaf page based on the value being sought.', example: 'Navigating the book index by letter. This page might say:\n"Keys < \'M\': Go Left (to Page 25)"\n"Keys >= \'M\': Go Right (to Page 28)"\nThe cell details would show:\n<code>Left Child -> pg 25, Payload Size: 1, Key Data @ 3000 (containing "M")</code>' },
+            'overflow': { title: 'Overflow Page', explanation: 'Used when a single piece of data (like a large text block, a BLOB image, or a very wide index entry) is too big to fit entirely on its primary leaf page. This page holds a chunk of that oversized data and usually points to the *next* overflow page if more data follows.', example: 'Imagine a footnote that\'s too long for the bottom of the page. This page contains the middle part of that footnote. Its first few bytes might point to Page 60, where the rest of the footnote continues.' },
+            'freelist-trunk': { title: 'Freelist Trunk Page', explanation: 'Part of SQLite\'s system for managing unused disk space. A trunk page doesn\'t list free pages directly, but contains pointers to multiple "Freelist Leaf" pages. It helps organize the freelist when there are many free pages.', example: 'Think of it as a directory for empty office rooms. This page lists the locations (page numbers) of several lists of empty rooms, like:\n"See Leaf Page 15 for some free pages"\n"See Leaf Page 30 for more free pages"\nIt also points to the next trunk page if the directory itself is large.' },
+            'freelist-leaf': { title: 'Freelist Leaf Page', explanation: 'This page contains a list of page numbers that are currently unused within the database file. SQLite can reuse these pages when new data needs to be written, avoiding the need to grow the file immediately.', example: 'A list of empty office room numbers: [7, 18, 25, 41, 55, ...]. SQLite can pick one of these page numbers when it needs space.' },
+            'unknown': { title: 'Unknown / Other Page', explanation: 'A page whose type flag was not recognized as one of the standard B-tree, Overflow, or Freelist types by this visualizer. This could potentially be:\n- Page 1 (which also contains the main file header).\n- The "lock-byte page" (used for concurrency control).\n- Part of a pointer map (used in WAL mode, less common in the main DB file).\n- A corrupted page.\n- A newer page type not yet handled by this tool.', example: 'Often Page 1 is the only one marked Unknown initially, as it starts with the 100-byte file header before its page data.' }
+        };
 
         // --- Event Listeners ---
         fileInput.addEventListener('change', handleFileSelect, false);
-        dialogCloseBtn.addEventListener('click', hideDialog);
-        dialogOverlay.addEventListener('click', hideDialog);
+        pageDetailCloseBtn.addEventListener('click', hidePageDetailDialog); // Use specific handler
+        legendHelpCloseBtn.addEventListener('click', hideLegendHelp);
+        // Use separate overlays logically
+        pageDetailOverlay.addEventListener('click', hidePageDetailDialog);
+        legendHelpOverlay.addEventListener('click', hideLegendHelp);
+
+        pageMapLegend.addEventListener('click', function(event) {
+            if (event.target && event.target.classList.contains('legend-term')) {
+                const term = event.target.dataset.term;
+                if (term) {
+                    showLegendHelp(term);
+                }
+            }
+        });
         // Delegate "Show More" clicks from the body
         document.body.addEventListener('click', function(event) {
             if (event.target && event.target.classList.contains('show-more-btn')) {
@@ -178,7 +291,8 @@
             }
         });
 
-        // --- Helper Function: Read Varint ---
+
+        // --- Helper: Read Varint (Formatted) ---
         function readVarint(dataView, offset) {
             let value = 0;
             let bytesRead = 0;
@@ -201,27 +315,23 @@
                     return { value: value, bytesRead: bytesRead };
                 }
             }
-            // Should not be reached if input is valid SQLite varint
             console.error(`readVarint: Invalid varint structure @ ${offset}`);
             return { value: 0, bytesRead: bytesRead, error: "Invalid varint structure" };
         }
 
-        // --- Helper Function: Format Hex/ASCII Dump ---
+        // --- Helper: Format Hex/ASCII Dump (Formatted) ---
         function formatHexAsciiDump(dataView, offset, length, indent = 4) {
-            const requestedLength = Math.max(0, length); // Ensure non-negative
+            const requestedLength = Math.max(0, length);
             if (requestedLength === 0) {
-                return ""; // No dump needed
+                return "";
             }
             const indentStr = ' '.repeat(indent);
-            let lines = []; // Build lines here
+            let lines = [];
             const maxOffset = dataView.byteLength;
 
-            // Validate starting offset
             if (offset >= maxOffset || offset < 0) {
                 return `<div class="data-dump">[Invalid start offset ${offset}]</div>`;
             }
-
-            // Determine actual number of bytes we can read
             const actualLength = Math.min(requestedLength, maxOffset - offset);
             if (actualLength <= 0) {
                 return `<div class="data-dump">[No data available at offset ${offset}]</div>`;
@@ -232,52 +342,39 @@
             let hexString = "";
             let asciiString = "";
             for (let i = 0; i < actualLength; i++) {
-                // Double check bounds inside loop ( belt-and-suspenders )
                 if (offset + i >= maxOffset) {
                     break;
                 }
-
                 const byte = dataView.getUint8(offset + i);
-                hexString += byte.toString(16).padStart(2, '0') + " "; // Hex byte + space
-                // Replace non-printable ASCII with '.'
+                hexString += byte.toString(16).padStart(2, '0') + " ";
                 asciiString += (byte >= 32 && byte <= 126) ? String.fromCharCode(byte) : ".";
 
-                // Format into 16-byte lines
                 if ((i + 1) % 16 === 0) {
-                    // Pad hex string to align the ASCII part (16 bytes * 3 chars/byte - 1 space = 47)
                     lines.push(indentStr + hexString.trim().padEnd(47) + " | " + asciiString);
-                    // Reset for next line
                     hexString = "";
                     asciiString = "";
                 }
             }
-
-            // Add any remaining bytes from the last partial line
             if (hexString) {
                 lines.push(indentStr + hexString.trim().padEnd(47) + " | " + asciiString);
             }
-
-            // Join lines and wrap in the styled div
             return `<div class="data-dump">${lines.join('\n')}</div>`;
         }
 
 
-        // --- Helper Function: Parse Cell Summary ---
+        // --- Helper: Parse Cell Summary (Formatted) ---
         function parseCellSummary(dataView, pageOffset, cellOffsetInPage, pageType, pageSize, pageNum, cellIndex) {
             const cellStart = pageOffset + cellOffsetInPage;
-            let summary = `Cell [${cellIndex}] @ Offset ${cellOffsetInPage}: `; // Start summary line
-            let dataDumpHtml = ""; // To hold dump HTML + button
+            let summary = `Cell [${cellIndex}] @ Offset ${cellOffsetInPage}: `;
+            let dataDumpHtml = "";
             let bytesAvailable = (pageOffset + pageSize) - cellStart;
-            const dumpContainerId = `dump-${pageNum}-${cellIndex}`; // Unique ID for the dump div
+            const dumpContainerId = `dump-${pageNum}-${cellIndex}`;
 
             try {
-                // Calculate where the header/pointer area ends (absolute offset)
-                const headerEndOffsetAbsolute = pageOffset
-                                              + (pageNum === 1 ? 100 : 0) // File header on page 1
-                                              + (pageData.find(p => p.pageNum === pageNum)?.pageHeaderSize || 0) // Page header
-                                              + ((pageData.find(p => p.pageNum === pageNum)?.header?.cellCount || 0) * 2); // Cell pointers
+                const pageHeaderSizeForCalc = pageData.find(p => p.pageNum === pageNum)?.pageHeaderSize || 0;
+                const cellCountForCalc = pageData.find(p => p.pageNum === pageNum)?.header?.cellCount || 0;
+                const headerEndOffsetAbsolute = pageOffset + (pageNum === 1 ? 100 : 0) + pageHeaderSizeForCalc + (cellCountForCalc * 2);
 
-                 // Basic validation of the cell offset
                  if (cellOffsetInPage <= 0 || cellStart < headerEndOffsetAbsolute || bytesAvailable <= 0) {
                       let errorMsg = "";
                       if (cellStart < headerEndOffsetAbsolute && cellOffsetInPage > 0) {
@@ -288,45 +385,32 @@
                           errorMsg = `[Suspicious Offset ${cellOffsetInPage}]`;
                       }
                       console.warn(`Page ${pageNum}, Cell ${cellIndex}: ${errorMsg}`);
-                      return { summaryText: summary + errorMsg, dumpHtml:"" }; // Return error summary
+                      return { summaryText: summary + errorMsg, dumpHtml:"" };
                  }
 
                 const usablePageSize = pageSize - (fileHeaderInfo?.reservedSpace || 0);
-                let payloadStartOffset = 0; // Where the actual data/key starts in this cell
-                let maxBytesOnPageForPayload = 0; // How many payload bytes fit on *this* page
-                let initialBytesToDump = 0; // How many bytes for the initial dump
-                let actualPayloadSize = -1; // Actual size declared in cell header (if applicable)
+                let payloadStartOffset = 0;
+                let maxBytesOnPageForPayload = 0;
+                let initialBytesToDump = 0;
+                let actualPayloadSize = -1;
 
-                // --- Parse based on Page Type ---
                 switch (pageType) {
-                    case 'table-leaf': { // 0x0D
-                        if (bytesAvailable < 1) {
-                            return { summaryText: summary + "[Too small]", dumpHtml:"" };
-                        }
+                    case 'table-leaf': {
+                        if (bytesAvailable < 1) return { summaryText: summary + "[Too small]", dumpHtml:"" };
                         const plSizeInfo = readVarint(dataView, cellStart);
-                        if (plSizeInfo.error) {
-                            return { summaryText: summary + `[Err PayloadSz: ${plSizeInfo.error}]`, dumpHtml:"" };
-                        }
+                        if (plSizeInfo.error) return { summaryText: summary + `[Err PayloadSz: ${plSizeInfo.error}]`, dumpHtml:"" };
                         actualPayloadSize = plSizeInfo.value;
                         let currentOffset = cellStart + plSizeInfo.bytesRead;
                         summary += `Payload Size: ${actualPayloadSize}, `;
-
-                        if ((currentOffset - pageOffset) + 1 > pageSize) { // Check if offset calculation went beyond page
-                             return { summaryText: summary + "[Offset exceeds page after reading payload size]", dumpHtml:"" };
-                        }
+                        if ((currentOffset - pageOffset) + 1 > pageSize) return { summaryText: summary + "[Offset exceeds page]", dumpHtml:"" };
                         const rowIdInfo = readVarint(dataView, currentOffset);
-                        if (rowIdInfo.error) {
-                             return { summaryText: summary + `[Err RowID @${currentOffset-pageOffset}: ${rowIdInfo.error}]`, dumpHtml:"" };
-                        }
+                        if (rowIdInfo.error) return { summaryText: summary + `[Err RowID @${currentOffset-pageOffset}: ${rowIdInfo.error}]`, dumpHtml:"" };
                         summary += `RowID: ${rowIdInfo.value}`;
                         currentOffset += rowIdInfo.bytesRead;
-
-                        payloadStartOffset = currentOffset; // This is where the actual record payload begins
-                        maxBytesOnPageForPayload = (pageOffset + pageSize) - payloadStartOffset; // Bytes from here to page end
-                        const maxPayloadOnPage = usablePageSize - 35; // SQLite constant approx
+                        payloadStartOffset = currentOffset;
+                        maxBytesOnPageForPayload = (pageOffset + pageSize) - payloadStartOffset;
+                        const maxPayloadOnPage = usablePageSize - 35;
                         const minPayloadForOverflow = maxPayloadOnPage + 1;
-
-                        // Check for overflow pointer
                         if (actualPayloadSize >= minPayloadForOverflow && maxBytesOnPageForPayload >= 4) {
                             const overflowPageNum = dataView.getUint32(payloadStartOffset, false);
                             if (overflowPageNum > 0) {
@@ -335,139 +419,107 @@
                                 if (currentPageData && !currentPageData.links.some(l => l.targetPage === overflowPageNum && l.type === 'overflow')) {
                                     currentPageData.links.push({ targetPage: overflowPageNum, type: 'overflow', cellOffset: cellOffsetInPage });
                                 }
-                            } else {
-                                summary += `, [Overflow Expected, Ptr=0?]`;
-                            }
-                            // Initial dump is limited for overflowed records
+                            } else { summary += `, [Overflow Expected, Ptr=0?]`; }
                             initialBytesToDump = Math.min(maxBytesOnPageForPayload, DUMP_LENGTH);
                         } else if (actualPayloadSize > 0 && maxBytesOnPageForPayload > 0) {
-                            // Not overflowed (or fits entirely), try reading record header size
                             const headerSizeInfo = readVarint(dataView, payloadStartOffset);
-                            if (!headerSizeInfo.error) {
-                                summary += `, Record Header Size: ${headerSizeInfo.value}`;
-                            }
-                            // Initial dump for non-overflowed records
+                            if (!headerSizeInfo.error) { summary += `, Record Header Size: ${headerSizeInfo.value}`; }
                             initialBytesToDump = Math.min(maxBytesOnPageForPayload, actualPayloadSize, DUMP_LENGTH);
-                        } else { // No payload or no space left for it
-                            maxBytesOnPageForPayload = 0; // Prevent dump generation
-                        }
-                        break; // End table-leaf case
+                        } else { maxBytesOnPageForPayload = 0; }
+                        break;
                     }
-
-                    case 'index-leaf': { // 0x0A
+                    case 'index-leaf': {
                         if (bytesAvailable < 1) return { summaryText: summary + "[Too small]", dumpHtml:"" };
                         const idxLeafPlSizeInfo = readVarint(dataView, cellStart);
                         if (idxLeafPlSizeInfo.error) return { summaryText: summary + `[Err PayloadSz: ${idxLeafPlSizeInfo.error}]`, dumpHtml:"" };
                         actualPayloadSize = idxLeafPlSizeInfo.value;
                         summary += `Payload Size: ${actualPayloadSize}`;
                         let currentOffset = cellStart + idxLeafPlSizeInfo.bytesRead;
-
-                        payloadStartOffset = currentOffset; // Start of key data
+                        payloadStartOffset = currentOffset;
                         maxBytesOnPageForPayload = (pageOffset + pageSize) - payloadStartOffset;
                         summary += `, Key Data @ ${payloadStartOffset - pageOffset}`;
-
-                        const idxMaxPayload = usablePageSize - 20; // Approx
-                        // Check for overflow
+                        const idxMaxPayload = usablePageSize - 20;
                         if (actualPayloadSize >= (idxMaxPayload + 1) && maxBytesOnPageForPayload >= 4) {
                             const overflowPageNum = dataView.getUint32(payloadStartOffset, false);
                             if (overflowPageNum > 0) {
                                 summary += `, Overflow -> pg ${overflowPageNum}`;
-                                 const currentPageData = pageData.find(p => p.pageNum === pageNum);
-                                 if (currentPageData && !currentPageData.links.some(l => l.targetPage === overflowPageNum && l.type === 'overflow')) {
-                                     currentPageData.links.push({ targetPage: overflowPageNum, type: 'overflow', cellOffset: cellOffsetInPage });
-                                 }
+                                const currentPageData = pageData.find(p => p.pageNum === pageNum);
+                                if (currentPageData && !currentPageData.links.some(l => l.targetPage === overflowPageNum && l.type === 'overflow')) {
+                                    currentPageData.links.push({ targetPage: overflowPageNum, type: 'overflow', cellOffset: cellOffsetInPage });
+                                }
                             } else { summary += `, [Overflow Expected, Ptr=0?]`; }
                             initialBytesToDump = Math.min(maxBytesOnPageForPayload, DUMP_LENGTH);
-                        } else { // Not overflowed
-                             initialBytesToDump = Math.min(maxBytesOnPageForPayload, actualPayloadSize, DUMP_LENGTH);
-                        }
-                        break; // End index-leaf case
+                        } else { initialBytesToDump = Math.min(maxBytesOnPageForPayload, actualPayloadSize, DUMP_LENGTH); }
+                        break;
                     }
-
-                    case 'table-internal': { // 0x05
+                    case 'table-internal': {
                         if (bytesAvailable < 4) return { summaryText: summary + "[Too small]", dumpHtml:"" };
                         const leftChildPtr = dataView.getUint32(cellStart, false);
                         summary += `Left Child -> pg ${leftChildPtr}, `;
                         let currentOffset = cellStart + 4;
-
                         if ((currentOffset - pageOffset) + 1 > pageSize) return { summaryText: summary + "[Offset exceeds page]", dumpHtml:"" };
                         const keyRowIdInfo = readVarint(dataView, currentOffset);
                         if (keyRowIdInfo.error) return { summaryText: summary + `[Err Key @${currentOffset-pageOffset}: ${keyRowIdInfo.error}]`, dumpHtml:"" };
                         summary += `Key (RowID): ${keyRowIdInfo.value}`;
-
-                        // Dump the varint bytes representing the key
                         payloadStartOffset = currentOffset;
-                        maxBytesOnPageForPayload = keyRowIdInfo.bytesRead; // Full key bytes
-                        initialBytesToDump = maxBytesOnPageForPayload; // Show the whole key initially
-                        break; // End table-internal case
+                        maxBytesOnPageForPayload = keyRowIdInfo.bytesRead;
+                        initialBytesToDump = maxBytesOnPageForPayload;
+                        break;
                     }
-
-                    case 'index-internal': { // 0x02
-                         if (bytesAvailable < 4) return { summaryText: summary + "[Too small]", dumpHtml:"" };
+                    case 'index-internal': {
+                        if (bytesAvailable < 4) return { summaryText: summary + "[Too small]", dumpHtml:"" };
                         const idxIntChildPtr = dataView.getUint32(cellStart, false);
                         summary += `Left Child -> pg ${idxIntChildPtr}, `;
                         let currentOffset = cellStart + 4;
-
                         if ((currentOffset - pageOffset) + 1 > pageSize) return { summaryText: summary + "[Offset exceeds page]", dumpHtml:"" };
                         const idxIntPlSizeInfo = readVarint(dataView, currentOffset);
                         if (idxIntPlSizeInfo.error) return { summaryText: summary + `[Err PayloadSz @${currentOffset-pageOffset}: ${idxIntPlSizeInfo.error}]`, dumpHtml:"" };
                         actualPayloadSize = idxIntPlSizeInfo.value;
                         summary += `Payload Size: ${actualPayloadSize}`;
                         currentOffset += idxIntPlSizeInfo.bytesRead;
-
-                        payloadStartOffset = currentOffset; // Start of key data
+                        payloadStartOffset = currentOffset;
                         maxBytesOnPageForPayload = (pageOffset + pageSize) - payloadStartOffset;
                         summary += `, Key Data @ ${payloadStartOffset - pageOffset}`;
-
-                        const idxIntMaxPayload = usablePageSize - 25; // Approx
-                        // Check for overflow
+                        const idxIntMaxPayload = usablePageSize - 25;
                         if (actualPayloadSize >= (idxIntMaxPayload + 1) && maxBytesOnPageForPayload >= 4) {
                             const overflowPageNum = dataView.getUint32(payloadStartOffset, false);
                             if (overflowPageNum > 0) {
                                 summary += `, Overflow -> pg ${overflowPageNum}`;
-                                 const currentPageData = pageData.find(p => p.pageNum === pageNum);
-                                 if (currentPageData && !currentPageData.links.some(l => l.targetPage === overflowPageNum && l.type === 'overflow')) {
-                                     currentPageData.links.push({ targetPage: overflowPageNum, type: 'overflow', cellOffset: cellOffsetInPage });
-                                 }
+                                const currentPageData = pageData.find(p => p.pageNum === pageNum);
+                                if (currentPageData && !currentPageData.links.some(l => l.targetPage === overflowPageNum && l.type === 'overflow')) {
+                                    currentPageData.links.push({ targetPage: overflowPageNum, type: 'overflow', cellOffset: cellOffsetInPage });
+                                }
                             } else { summary += `, [Overflow Expected, Ptr=0?]`; }
                             initialBytesToDump = Math.min(maxBytesOnPageForPayload, DUMP_LENGTH);
-                        } else { // Not overflowed
-                            initialBytesToDump = Math.min(maxBytesOnPageForPayload, actualPayloadSize, DUMP_LENGTH);
-                        }
-                        break; // End index-internal case
+                        } else { initialBytesToDump = Math.min(maxBytesOnPageForPayload, actualPayloadSize, DUMP_LENGTH); }
+                        break;
                     }
-
-                    default: { // Unknown B-tree type or other page type cells?
+                    default: {
                         summary += `[Raw Data - Type ${pageType} cell format not decoded]`;
-                        payloadStartOffset = cellStart; // Dump raw bytes from cell start
+                        payloadStartOffset = cellStart;
                         maxBytesOnPageForPayload = bytesAvailable;
                         initialBytesToDump = Math.min(bytesAvailable, DUMP_LENGTH);
                         break;
                     }
                 } // End switch
 
-                // --- Generate Dump HTML ---
-                initialBytesToDump = Math.max(0, initialBytesToDump); // Ensure non-negative
+                initialBytesToDump = Math.max(0, initialBytesToDump);
                 maxBytesOnPageForPayload = Math.max(0, maxBytesOnPageForPayload);
 
-                // Only generate dump container if there's potentially data to show
                 if (maxBytesOnPageForPayload > 0) {
                     const initialDump = formatHexAsciiDump(dataView, payloadStartOffset, initialBytesToDump);
-                    // Wrap initial dump in its container
                     dataDumpHtml += `<div id="${dumpContainerId}" class="dump-content-container">${initialDump}</div>`;
-                    // Add button *if* there's more to show than initially dumped
                     if (maxBytesOnPageForPayload > initialBytesToDump) {
-                         dataDumpHtml += `<button class="show-more-btn" data-target-id="${dumpContainerId}" data-start-offset="${payloadStartOffset}" data-max-bytes="${maxBytesOnPageForPayload}">Show All (${maxBytesOnPageForPayload} bytes on page)</button>`;
+                        dataDumpHtml += `<button class="show-more-btn" data-target-id="${dumpContainerId}" data-start-offset="${payloadStartOffset}" data-max-bytes="${maxBytesOnPageForPayload}">Show All (${maxBytesOnPageForPayload} bytes on page)</button>`;
                     }
-                } else { // No data on this page or payload size is 0
+                } else {
                     dataDumpHtml = `<div class="data-dump">[No data to dump for this cell]</div>`;
                 }
 
             } catch (e) {
-                console.error(`Error parsing cell ${cellIndex} at offset ${cellOffsetInPage} on page ${pageNum} (Type ${pageType}):`, e);
+                console.error(`Error parsing cell ${cellIndex} @ ${cellOffsetInPage} on page ${pageNum} (Type ${pageType}):`, e);
                 summary += ` [Exception: ${e.message}]`;
             }
-            // Return structured object containing summary text and dump HTML
             return { summaryText: summary, dumpHtml: dataDumpHtml };
         } // End parseCellSummary
 
@@ -508,14 +560,35 @@
         }
 
         // --- Dialog Show/Hide ---
-        function showDialog() {
+        function showPageDetailDialog() {
             document.body.classList.add('dialog-visible');
+            document.body.classList.remove('legend-dialog-visible'); // Ensure legend is hidden
         }
-        function hideDialog() {
+        function hidePageDetailDialog() {
             document.body.classList.remove('dialog-visible');
-            // Reset dialog content for next time
-            dialogContent.innerHTML = '<p>Loading...</p>';
-            dialogTitle.textContent = 'Page Details';
+            pageDetailContent.innerHTML = '<p>Loading...</p>'; // Reset content
+            pageDetailTitle.textContent = 'Page Details';
+        }
+        function showLegendHelp(term) {
+            const helpData = legendExplanations[term];
+            if (helpData) {
+                legendHelpTitle.textContent = helpData.title || 'Legend Help';
+                // Escape HTML in example before injecting
+                const safeExample = helpData.example ? helpData.example.replace(/</g, "<").replace(/>/g, ">") : '';
+                legendHelpContent.innerHTML = `
+                    <p>${helpData.explanation}</p>
+                    ${helpData.example ? `<h3>Example:</h3><pre>${safeExample}</pre>` : ''}
+                `;
+                document.body.classList.add('legend-dialog-visible');
+                document.body.classList.remove('dialog-visible'); // Ensure page detail is hidden
+            } else {
+                console.warn("No explanation found for term:", term);
+            }
+        }
+        function hideLegendHelp() {
+            document.body.classList.remove('legend-dialog-visible');
+            legendHelpContent.innerHTML = ''; // Clear content
+            legendHelpTitle.textContent = 'Legend Explanation';
         }
 
         // --- File Handling and Parsing Logic ---
@@ -524,7 +597,7 @@
              if (!file) {
                  return;
              }
-             resetUIAndData(); // Clear previous state
+             resetUIAndData();
              headerOutput.textContent = 'Reading file...';
 
              const reader = new FileReader();
@@ -541,16 +614,17 @@
                      parseSqliteFile(fileBuffer);
                      console.log("Finished parseSqliteFile. Starting rendering...");
 
-                     renderHeaderInfo(); // Update header info display first
+                     renderHeaderInfo();
                      console.log("Finished renderHeaderInfo.");
 
-                     renderPageMap(); // Render the map boxes
+                     renderPageMap();
                      console.log("Finished renderPageMap.");
 
-                     renderLinks(); // Render the links on the map
+                     renderLinks();
                      console.log("Finished renderLinks.");
 
-                     hideDialog(); // Ensure dialog is hidden after successful load
+                     hidePageDetailDialog(); // Ensure dialogs are hidden initially
+                     hideLegendHelp();
                      console.log("UI updated for successful load.");
 
                  } catch (error) {
@@ -558,7 +632,8 @@
                      console.error("!!! Critical Error caught in onload:", error);
                      console.error("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
                      headerOutput.textContent = `Error processing file: ${error.message}\nSee console for details.`;
-                     hideDialog(); // Ensure dialog is hidden on error
+                     hidePageDetailDialog(); // Ensure dialogs hidden on error
+                     hideLegendHelp();
                  }
              };
              reader.onerror = function(e) {
@@ -573,13 +648,13 @@
              headerOutput.textContent = 'Upload a SQLite file to begin...';
              pageMapDiv.innerHTML = '';
              linkOverlay.innerHTML = '';
-             hideDialog(); // Ensure dialog is hidden on reset
+             hidePageDetailDialog();
+             hideLegendHelp();
              pageData = [];
              fileHeaderInfo = {};
              pageSize = 0;
              fileBuffer = null;
-             // Consider clearing console only if desired, might hide previous errors
-             // console.clear();
+             // console.clear(); // Optional: Clear console
         }
 
         function parseSqliteFile(buffer) {
@@ -589,7 +664,6 @@
 
             // --- 1. Parse File Header (Bytes 0-99) ---
             console.group("Parsing File Header");
-            // (Magic string check and header field parsing - Formatted)
             console.log("Attempting to read first 16 bytes for magic string...");
             const expectedMagic = "SQLite format 3\0";
             let actualMagic = "";
@@ -679,7 +753,6 @@
                     case 0x05: pageType = 'table-internal'; pageHeaderSize = 12; break;
                     case 0x0a: pageType = 'index-leaf'; pageHeaderSize = 8; break;
                     case 0x0d: pageType = 'table-leaf'; pageHeaderSize = 8; break;
-                    // default: leave as 'unknown' and size 8 (will be adjusted later for non-btree)
                 }
 
                 let pageInfo = {
@@ -687,10 +760,9 @@
                     rawOffset: pageOffset, pageHeaderSize: pageHeaderSize, cellOffsets: []
                 };
 
-                // Parse B-tree page header if applicable
                 if (pageType !== 'unknown') {
                     if (headerBase + pageHeaderSize > buffer.byteLength) {
-                         console.warn(`Page ${i}: Not enough space for ${pageType} header (needs ${pageHeaderSize} bytes).`);
+                         console.warn(`Page ${i}: Not enough space for ${pageType} header.`);
                          pageInfo.header.error = "Header truncated";
                     } else {
                          pageInfo.header = {
@@ -700,7 +772,7 @@
                              cellContentStartOffset: dataView.getUint16(headerBase + 5, false),
                              fragmentedFreeBytes: dataView.getUint8(headerBase + 7)
                          };
-                         if (pageHeaderSize === 12) { // Internal pages have right pointer
+                         if (pageHeaderSize === 12) {
                              pageInfo.header.rightMostPointer = dataView.getUint32(headerBase + 8, false);
                              const rightPtr = pageInfo.header.rightMostPointer;
                              if (rightPtr > 0 && rightPtr <= numPages) {
@@ -709,35 +781,28 @@
                                  console.warn(`Page ${i}: Invalid right-most pointer ${rightPtr}`);
                              }
                          }
-                         // Handle cellContentStartOffset == 0 meaning end of page (often 65536 for large pages)
                          if (pageInfo.header.cellContentStartOffset === 0 && pageInfo.header.cellCount > 0) {
                              pageInfo.header.cellContentStartOffset = pageSize;
                              console.log(`Page ${i}: Corrected cellContentStartOffset 0 to ${pageSize}`);
                          }
                     }
                 } else {
-                     // Page is not a B-tree type based on flag.
-                     // Freelist/Overflow/Unknown might have flag 0 or others.
-                     // Set header size to 0 for these as we don't parse a B-tree header.
                      pageInfo.pageHeaderSize = 0;
                      pageInfo.header = { flag: pageTypeFlag, note: "Not a known B-tree page type" };
                 }
 
-                // Read Cell Pointer Array for B-tree pages
                 if (pageInfo.header.cellCount > 0 && pageType !== 'unknown') {
                     const cellPointerArrayStart = headerBase + pageHeaderSize;
                     const cellPointerArrayEnd = cellPointerArrayStart + pageInfo.header.cellCount * 2;
 
                     if (cellPointerArrayEnd > pageOffset + pageSize) {
-                         console.warn(`Page ${i}: Cell pointer array extends beyond page boundary (ends at ${cellPointerArrayEnd - pageOffset}).`);
+                         console.warn(`Page ${i}: Cell pointer array extends beyond page boundary.`);
                          pageInfo.header.error = (pageInfo.header.error || "") + " Cell pointer array truncated.";
                     } else {
                          for (let c = 0; c < pageInfo.header.cellCount; c++) {
                              const pointerOffset = cellPointerArrayStart + (c * 2);
-                             const cellOffsetInPage = dataView.getUint16(pointerOffset, false); // Relative to page start
-                             const headerAndPointersEndAbsolute = cellPointerArrayEnd; // Absolute file offset
-
-                             // Validate offset: Must be within page and *after* the pointer array
+                             const cellOffsetInPage = dataView.getUint16(pointerOffset, false);
+                             const headerAndPointersEndAbsolute = cellPointerArrayEnd;
                              if (cellOffsetInPage > 0 &&
                                  cellOffsetInPage < pageSize &&
                                  (pageOffset + cellOffsetInPage) >= headerAndPointersEndAbsolute)
@@ -745,28 +810,24 @@
                                 pageInfo.cellOffsets.push(cellOffsetInPage);
                              } else {
                                 console.warn(`Page ${i}: Cell ${c} invalid offset ${cellOffsetInPage} (Hdr/Ptrs end at ${headerAndPointersEndAbsolute - pageOffset}, PgSz ${pageSize}). Storing 0.`);
-                                pageInfo.cellOffsets.push(0); // Mark invalid offset with 0
+                                pageInfo.cellOffsets.push(0);
                              }
                          }
-                         // Sort offsets, putting invalid 0s at the end for processing
                          pageInfo.cellOffsets.sort((a, b) => {
                              if (a === 0 && b === 0) return 0;
-                             if (a === 0) return 1; // 0 is "greater" -> goes last
-                             if (b === 0) return -1; // non-zero is "less" -> goes first
-                             return a - b; // Sort valid offsets numerically
+                             if (a === 0) return 1;
+                             if (b === 0) return -1;
+                             return a - b;
                          });
                      }
-                 } // End cell pointer reading
+                 }
 
-                 // Add B-tree child links from Internal Page Cells
                  if (pageInfo.type === 'table-internal' || pageInfo.type === 'index-internal') {
                      pageInfo.cellOffsets.forEach((cellOffset, cIdx) => {
-                         // Skip invalid offsets marked as 0
                          if (cellOffset > 0 && (pageOffset + cellOffset + 4) <= (pageOffset + pageSize)) {
                              const actualCellOffset = pageOffset + cellOffset;
                              const leftChildPage = dataView.getUint32(actualCellOffset, false);
                              if (leftChildPage > 0 && leftChildPage <= numPages) {
-                                  // Avoid duplicating right-most pointer if it's also a left child of last cell
                                   if (!pageInfo.links.some(l => l.targetPage === leftChildPage && l.type === 'btree-child')) {
                                      pageInfo.links.push({ targetPage: leftChildPage, type: 'btree-child', detail: `cell ${cIdx}` });
                                   }
@@ -775,8 +836,7 @@
                              }
                          }
                      });
-                 } // End adding internal links
-
+                 }
                 pageData.push(pageInfo);
              } // End page loop
              console.groupEnd(); // End Page Parsing group
@@ -822,7 +882,7 @@
                          console.warn(`Freelist Trunk ${currentFreelistTrunk}: Header claims ${numLeaves} leaves, only ${maxLeavesReadable} fit.`);
                      }
 
-                     for(let k = 0; k < actualNumLeaves; k++) {
+                     for (let k = 0; k < actualNumLeaves; k++) {
                          const leafPointerOffset = leafPointerStartOffset + (k * 4);
                          if (leafPointerOffset + 4 > pageOffset + pageSize) {
                               console.warn(`Freelist Trunk ${currentFreelistTrunk}: Attempted read beyond page boundary for leaf pointer ${k}.`);
@@ -833,7 +893,7 @@
                          if (leafPageNum > 0 && leafPageNum <= numPages) {
                               flTrunkPage.links.push({targetPage: leafPageNum, type: 'freelist-leaf-ptr'});
                               const flLeafPage = pageData.find(p => p.pageNum === leafPageNum);
-                              if(flLeafPage) {
+                              if (flLeafPage) {
                                    if (flLeafPage.type !== 'unknown') {
                                         console.warn(`Page ${leafPageNum} is freelist leaf, but typed as ${flLeafPage.type}. Overwriting.`);
                                    }
@@ -974,7 +1034,7 @@
                  pageElement.addEventListener('click', (e) => {
                      document.querySelectorAll('.page.selected').forEach(el => el.classList.remove('selected'));
                      e.currentTarget.classList.add('selected');
-                     showPageDetail(page.pageNum);
+                     showPageDetail(page.pageNum); // Call the specific function
                  });
                  fragment.appendChild(pageElement);
              });
@@ -1033,9 +1093,12 @@
              }
 
              const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-             line.setAttribute('x1', sourceX); line.setAttribute('y1', startY);
-             line.setAttribute('x2', targetX); line.setAttribute('y2', endY);
-             line.style.stroke = color; line.style.strokeWidth = '1.5';
+             line.setAttribute('x1', sourceX);
+             line.setAttribute('y1', startY);
+             line.setAttribute('x2', targetX);
+             line.setAttribute('y2', endY);
+             line.style.stroke = color;
+             line.style.strokeWidth = '1.5';
              if (strokeDash) {
                  line.style.strokeDasharray = strokeDash;
              }
@@ -1045,13 +1108,13 @@
              linkOverlay.appendChild(line);
         }
 
-        // --- Show Page Detail in Dialog (Updated for Tabular View) ---
+        // --- Show Page Detail in Dialog ---
         function showPageDetail(pageNum) {
             const page = pageData.find(p => p.pageNum === pageNum);
             if (!page || !fileBuffer) {
-                dialogTitle.textContent = `Error`;
-                dialogContent.innerHTML = `<p>Details for page ${pageNum} not found or file buffer missing.</p>`;
-                showDialog();
+                pageDetailTitle.textContent = `Error`; // Use correct title ID
+                pageDetailContent.innerHTML = `<p>Details for page ${pageNum} not found or file buffer missing.</p>`;
+                showPageDetailDialog();
                 return;
             }
 
@@ -1077,16 +1140,11 @@
                  (page.cellOffsets || []).forEach((offset, index) => {
                      if (offset === 0) { invalidOffsets++; return; }
                      let nextOffset = pageSize;
-                     for(let nextIdx = index + 1; nextIdx < page.cellOffsets.length; nextIdx++) {
-                         if (page.cellOffsets[nextIdx] > 0) { nextOffset = page.cellOffsets[nextIdx]; break; }
-                     }
-                     if (offset > 0 && offset < pageSize) {
-                         if (nextOffset > offset) { usedCellSpace += (nextOffset - offset); }
-                         else { console.warn(`Page ${pageNum} Cell ${index}: Invalid size calculation (offset ${offset}, nextOffset ${nextOffset})`); }
-                     }
+                     for(let nextIdx = index + 1; nextIdx < page.cellOffsets.length; nextIdx++) { if (page.cellOffsets[nextIdx] > 0) { nextOffset = page.cellOffsets[nextIdx]; break; } }
+                     if (offset > 0 && offset < pageSize) { if (nextOffset > offset) { usedCellSpace += (Math.min(nextOffset, pageSize) - offset); } else { usedCellSpace += (pageSize - offset); console.warn(`Page ${pageNum} Cell ${index}: Unusual size calc`); } } else { console.warn(`Page ${pageNum} Cell ${index}: Offset ${offset} invalid`); }
                  });
                  const cellContentStart = page.header?.cellContentStartOffset || 0;
-                 const freeBeforeContent = cellContentStart > totalHeaderAreaSize ? cellContentStart - totalHeaderAreaSize : 0;
+                 const freeBeforeContent = (cellContentStart >= totalHeaderAreaSize && cellContentStart <= pageSize) ? cellContentStart - totalHeaderAreaSize : 0;
                  const totalUsedApprox = totalHeaderAreaSize + usedCellSpace;
                  const estimatedFreeTotal = pageSize - totalUsedApprox;
 
@@ -1111,14 +1169,12 @@
             if (page.header && Object.keys(page.header).length > 0) {
                 detailHtml += `<dl>`;
                 for (const key in page.header) {
-                     // Simple formatting for the value
                      let value = page.header[key];
-                     if (typeof value === 'object' && value !== null) {
-                         value = JSON.stringify(value); // Basic display for nested objects/arrays
-                     } else if (value === undefined) {
-                         value = 'undefined';
-                     }
-                     detailHtml += `<dt>${key}</dt><dd>${value}</dd>`;
+                     if (typeof value === 'object' && value !== null) value = JSON.stringify(value);
+                     else if (value === undefined) value = 'undefined';
+                     const safeKey = key.replace(/</g, "<").replace(/>/g, ">");
+                     const safeValue = String(value).replace(/</g, "<").replace(/>/g, ">");
+                     detailHtml += `<dt>${safeKey}</dt><dd>${safeValue}</dd>`;
                 }
                  detailHtml += `</dl>`;
             } else {
@@ -1127,8 +1183,9 @@
 
             // --- Links Section ---
             detailHtml += `<h3>Links Originating From This Page</h3>`;
-            // Keep using <pre> for JSON array display as it's compact
-            detailHtml += `<pre>${(page.links && page.links.length > 0) ? `${JSON.stringify(page.links, null, 2)}` : `(None identified)`}</pre>`;
+            const linksJson = (page.links && page.links.length > 0) ? JSON.stringify(page.links, null, 2) : '(None identified)';
+            const safeLinksJson = linksJson.replace(/</g, "<").replace(/>/g, ">");
+            detailHtml += `<pre>${safeLinksJson}</pre>`;
 
             // --- Cell Summaries Section ---
             detailHtml += `<h3>Cell Summaries (${page.cellOffsets?.length || 0} cells)</h3>`;
@@ -1140,10 +1197,10 @@
                  if (validOffsets.length > 0) {
                      validOffsets.forEach((offset, index) => {
                          const cellOutput = parseCellSummary(dataView, page.rawOffset, offset, page.type, pageSize, page.pageNum, index);
-                         // Structure each cell
+                         const safeSummaryText = cellOutput.summaryText.replace(/</g, "<").replace(/>/g, ">");
                          detailHtml += `<div class="cell-detail-item">`;
-                         detailHtml += `<p>${cellOutput.summaryText}</p>`; // Summary text
-                         detailHtml += cellOutput.dumpHtml; // Dump HTML (div + button)
+                         detailHtml += `<p>${safeSummaryText}</p>`;
+                         detailHtml += cellOutput.dumpHtml;
                          detailHtml += `</div>`;
                      });
                  } else {
@@ -1155,12 +1212,12 @@
                 detailHtml += `<p>(No cells applicable or reported for this page type)</p>`;
             }
 
-            // Update Dialog
-            dialogTitle.textContent = `Page ${page.pageNum} Details (${page.type})`;
-            dialogContent.innerHTML = detailHtml; // Set combined content
-            dialogContent.scrollTop = 0; // Scroll dialog content to top
-            showDialog();
-            renderLinks(); // Update map links if overflow added
+            // Update Page Detail Dialog
+            pageDetailTitle.textContent = `Page ${page.pageNum} Details (${page.type})`; // Use correct ID
+            pageDetailContent.innerHTML = detailHtml; // Use correct ID
+            pageDetailContent.scrollTop = 0;
+            showPageDetailDialog(); // Show the correct dialog
+            renderLinks();
 
         } // End showPageDetail
 
