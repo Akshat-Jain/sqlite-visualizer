@@ -8,60 +8,60 @@
         h1, h2 { border-bottom: 1px solid #eee; padding-bottom: 5px;}
         #fileInfo { margin-bottom: 15px; border: 1px solid #ccc; padding: 10px; background-color: #f9f9f9;}
         #pageMapContainer {
-            width: 98%; /* Use more width */
-            height: 120px; /* Slightly taller */
+            width: 98%;
+            height: 120px;
             border: 1px solid #ccc;
             overflow-x: auto;
             overflow-y: hidden;
             white-space: nowrap;
             margin-bottom: 20px;
-            position: relative; /* For SVG overlay */
-            background-color: #fafafa; /* Light background for map */
+            position: relative;
+            background-color: #fafafa;
         }
         .page {
             display: inline-block;
             height: 100%;
-            border-right: 1px solid #ddd; /* Lighter border */
+            border-right: 1px solid #ddd;
             box-sizing: border-box;
             cursor: pointer;
-            font-size: 9px; /* Slightly larger page numbers */
+            font-size: 9px;
             text-align: center;
             vertical-align: top;
             position: relative;
             overflow: hidden;
-            color: #555; /* Dark grey text */
+            color: #555;
             font-weight: bold;
         }
         .page:hover {
              border: 1px solid black;
-             z-index: 10; /* Bring to front on hover */
-             filter: brightness(1.1); /* Highlight slightly */
+             z-index: 10;
+             filter: brightness(1.1);
         }
         .page.selected {
             border: 2px solid black;
-            outline: 1px solid yellow; /* Clear selection indicator */
+            outline: 1px solid orange;
             filter: brightness(1.2);
         }
 
-        /* --- Page Type Colors --- */
-        .page-file-header { background-color: #e0e0e0; } /* Should only apply to page 1 concept */
-        .page-table-internal { background-color: #87CEFA; color: #005; } /* Light Sky Blue (Type 5) */
-        .page-index-internal { background-color: #ADD8E6; color: #005;} /* Light Blue (Type 2) */
-        .page-table-leaf { background-color: #90EE90; color: #050; } /* Light Green (Type 13 / 0x0D) */
-        .page-index-leaf { background-color: #98FB98; color: #050; } /* Pale Green (Type 10 / 0x0A) */
-        .page-overflow { background-color: #FFA07A; color: #720; } /* Light Salmon */
-        .page-freelist-trunk { background-color: #FFD700; color: #640; } /* Gold */
-        .page-freelist-leaf { background-color: #FFFFE0; color: #660; } /* Light Yellow */
-        .page-unknown { background-color: #D3D3D3; color: #333; } /* Light Grey */
+        /* Page Type Colors */
+        .page-file-header { background-color: #e0e0e0; }
+        .page-table-internal { background-color: #87CEFA; color: #005; }
+        .page-index-internal { background-color: #ADD8E6; color: #005;}
+        .page-table-leaf { background-color: #90EE90; color: #050; }
+        .page-index-leaf { background-color: #98FB98; color: #050; }
+        .page-overflow { background-color: #FFA07A; color: #720; }
+        .page-freelist-trunk { background-color: #FFD700; color: #640; }
+        .page-freelist-leaf { background-color: #FFFFE0; color: #660; }
+        .page-unknown { background-color: #D3D3D3; color: #333; }
 
         #pageDetail {
             border: 1px solid #ccc;
             padding: 15px;
             min-height: 150px;
-            white-space: pre-wrap; /* Allows wrapping */
-            word-wrap: break-word; /* Breaks long words/lines */
+            white-space: pre-wrap;
+            word-wrap: break-word;
             background-color: #f9f9f9;
-            font-family: monospace; /* Better for preformatted text */
+            font-family: monospace;
             font-size: 0.9em;
             line-height: 1.4;
         }
@@ -70,27 +70,46 @@
              position: absolute;
              top: 0;
              left: 0;
-             width: 100%; /* Dynamically sized */
+             width: 100%;
              height: 100%;
-             pointer-events: none; /* Clicks pass through */
+             pointer-events: none;
              z-index: 5;
         }
-        #linkOverlay line {
-            stroke-width: 1.5; /* Slightly thicker lines */
-        }
-         #linkOverlay line title { /* Tooltip for lines */
-             pointer-events: auto; /* Allow hover on title within line */
-         }
+        #linkOverlay line { stroke-width: 1.5; }
+        #linkOverlay line title { pointer-events: auto; }
 
-         pre { /* Style preformatted text */
+         /* Style preformatted text and nested elements */
+         #detailOutput pre {
             margin: 0;
             padding: 5px;
             background-color: #eee;
             border: 1px dashed #ccc;
             border-radius: 4px;
-            overflow-x: auto; /* Scroll long lines in pre */
+            overflow-x: auto;
+            white-space: pre-wrap; /* Ensure wrapping within pre */
+            word-wrap: break-word;
          }
-
+         .data-dump {
+            margin-top: 5px;
+            padding-left: 15px;
+            font-size: 0.9em;
+            color: #444;
+            white-space: pre; /* Keep dump formatting */
+            overflow-x: auto;
+         }
+         .dump-content-container {
+             margin-bottom: 5px;
+         }
+         .show-more-btn {
+            display: block; /* Place button on its own line */
+            margin-left: 20px;
+            margin-top: 3px;
+            margin-bottom: 8px; /* Space after button */
+            padding: 2px 6px;
+            font-size: 0.8em;
+            cursor: pointer;
+            font-family: sans-serif; /* Use default font for button */
+        }
     </style>
 </head>
 <body>
@@ -125,94 +144,104 @@
         const detailOutputDiv = document.getElementById('detailOutput'); // Target the div
         const linkOverlay = document.getElementById('linkOverlay');
 
-        let pageData = []; // { pageNum, type, links: [], header: {}, rawOffset, pageHeaderSize, cellOffsets: [] }
+        let pageData = [];
         let pageSize = 0;
         let fileBuffer = null;
-        let fileHeaderInfo = {}; // Parsed file header bytes 0-99
+        let fileHeaderInfo = {};
+
+        const DUMP_LENGTH = 32; // Initial number of bytes to show
 
         fileInput.addEventListener('change', handleFileSelect, false);
 
         // --- Helper Function: Read Varint ---
-        /**
-         * Reads a variable-length integer (varint) from the DataView.
-         * See: https://www.sqlite.org/fileformat2.html#varint
-         * Returns an object: { value: number, bytesRead: number, error?: string }
-         */
         function readVarint(dataView, offset) {
             let value = 0;
             let bytesRead = 0;
             let maxOffset = dataView.byteLength - 1;
-
             for (let i = 0; i < 9; i++) {
-                if (offset + i > maxOffset) {
-                    console.warn(`readVarint: Attempted read past buffer end at offset ${offset + i}`);
-                    return { value: 0, bytesRead: i, error: "Read past buffer end" };
-                }
-                let byte = dataView.getUint8(offset + i);
-                bytesRead++;
+                if (offset + i > maxOffset) return { value: 0, bytesRead: i, error: "Read past buffer end" };
+                let byte = dataView.getUint8(offset + i); bytesRead++;
                 if (i < 8) {
                     value = (value << 7) | (byte & 0x7f);
-                    if ((byte & 0x80) === 0) {
-                        return { value: value, bytesRead: bytesRead };
-                    }
-                } else {
-                    // Potential precision loss for > 53 bits
-                    value = (value << 8) | byte;
-                    return { value: value, bytesRead: bytesRead };
-                }
+                    if ((byte & 0x80) === 0) return { value: value, bytesRead: bytesRead };
+                } else { value = (value << 8) | byte; return { value: value, bytesRead: bytesRead }; }
             }
-            console.error(`readVarint: Invalid varint structure at offset ${offset}`);
-            return { value: 0, bytesRead: bytesRead, error: "Invalid varint structure (exceeded 9 bytes)" };
+            return { value: 0, bytesRead: bytesRead, error: "Invalid varint structure" };
         }
 
-                // --- Helper Function: Parse Cell Summary ---
-        /**
-         * Parses the beginning of a cell based on page type and returns a summary string.
-         */
-        function parseCellSummary(dataView, pageOffset, cellOffsetInPage, pageType, pageSize, pageNum) {
+        // --- Helper Function: Format Hex/ASCII Dump ---
+        function formatHexAsciiDump(dataView, offset, length, indent = 4) {
+            const requestedLength = Math.max(0, length);
+            if (requestedLength === 0) return "";
+            const indentStr = ' '.repeat(indent);
+            let lines = [];
+            const maxOffset = dataView.byteLength;
+            if (offset >= maxOffset || offset < 0) return `<div class="data-dump">[Invalid start offset ${offset}]</div>`;
+            const actualLength = Math.min(requestedLength, maxOffset - offset);
+            if (actualLength <= 0) return `<div class="data-dump">[No data available at offset ${offset}]</div>`;
+
+            lines.push(`Data @ Offset ${offset} (showing ${actualLength}/${requestedLength} requested bytes):`);
+            let hexString = "", asciiString = "";
+            for (let i = 0; i < actualLength; i++) {
+                if (offset + i >= maxOffset) break;
+                const byte = dataView.getUint8(offset + i);
+                hexString += byte.toString(16).padStart(2, '0') + " ";
+                asciiString += (byte >= 32 && byte <= 126) ? String.fromCharCode(byte) : ".";
+                if ((i + 1) % 16 === 0) {
+                    lines.push(indentStr + hexString.trim().padEnd(47) + " | " + asciiString);
+                    hexString = ""; asciiString = "";
+                }
+            }
+            if (hexString) lines.push(indentStr + hexString.trim().padEnd(47) + " | " + asciiString);
+            // Return raw text content suitable for <pre>, wrapped in its styled div
+            return `<div class="data-dump">${lines.join('\n')}</div>`;
+        }
+
+
+        // --- Helper Function: Parse Cell Summary ---
+        function parseCellSummary(dataView, pageOffset, cellOffsetInPage, pageType, pageSize, pageNum, cellIndex) {
             const cellStart = pageOffset + cellOffsetInPage;
-            let summary = `Cell @ Offset ${cellOffsetInPage}: `;
+            let summary = `Cell [${cellIndex}] @ Offset ${cellOffsetInPage}: `;
+            let dataDumpHtml = "";
             let bytesAvailable = (pageOffset + pageSize) - cellStart;
+            const dumpContainerId = `dump-${pageNum}-${cellIndex}`; // Unique ID
 
             try {
-                // Basic offset validation (moved earlier for clarity)
-                 const headerEndOffsetAbsolute = pageOffset + (pageNum === 1 ? 100 : 0) + (pageData.find(p=>p.pageNum===pageNum)?.pageHeaderSize || 0) + ((pageData.find(p=>p.pageNum===pageNum)?.header?.cellCount || 0) * 2);
-                if (cellOffsetInPage <= 0 || cellStart < headerEndOffsetAbsolute || bytesAvailable <= 0) {
-                     if (cellStart < headerEndOffsetAbsolute && cellOffsetInPage > 0) {
-                         return summary + `[Invalid Offset ${cellOffsetInPage} - points inside header/pointer area ending at ${headerEndOffsetAbsolute - pageOffset}]`;
-                     } else if (bytesAvailable <= 0) {
-                         return summary + "[No space available at offset]";
-                     } else { // Offset 0 or other unusual low value
-                         return summary + `[Suspicious Offset ${cellOffsetInPage}]`;
-                     }
-                }
-
-
+                const headerEndOffsetAbsolute = pageOffset + (pageNum === 1 ? 100 : 0) + (pageData.find(p=>p.pageNum===pageNum)?.pageHeaderSize || 0) + ((pageData.find(p=>p.pageNum===pageNum)?.header?.cellCount || 0) * 2);
+                 if (cellOffsetInPage <= 0 || cellStart < headerEndOffsetAbsolute || bytesAvailable <= 0) {
+                      if (cellStart < headerEndOffsetAbsolute && cellOffsetInPage > 0) { return { summaryText: summary + `[Invalid Offset ${cellOffsetInPage}]`, dumpHtml:"" }; }
+                      else if (bytesAvailable <= 0) { return { summaryText: summary + "[No space]", dumpHtml:"" }; }
+                      else { return { summaryText: summary + `[Suspicious Offset ${cellOffsetInPage}]`, dumpHtml:"" }; }
+                 }
                 const usablePageSize = pageSize - (fileHeaderInfo?.reservedSpace || 0);
+                let payloadStartOffset = 0;
+                let maxBytesOnPageForPayload = 0;
+                let initialBytesToDump = 0;
+                let actualPayloadSize = -1; // Track actual size if known
 
                 switch (pageType) {
-                    case 'table-leaf': // 0x0D
-                        { // Use block scope for clarity with let
-                            if (bytesAvailable < 1) return summary + "[Too small for payload size]";
+                    case 'table-leaf':
+                        {
+                            if (bytesAvailable < 1) return { summaryText: summary + "[Too small]", dumpHtml:"" };
                             const plSizeInfo = readVarint(dataView, cellStart);
-                            if (plSizeInfo.error) return summary + `[Error reading payload size: ${plSizeInfo.error}]`;
-                            const payloadSize = plSizeInfo.value;
-                            let currentOffset = cellStart + plSizeInfo.bytesRead; // Initialized here
-                            summary += `PayloadSz: ${payloadSize}, `;
+                            if (plSizeInfo.error) return { summaryText: summary + `[Err PayloadSz: ${plSizeInfo.error}]`, dumpHtml:"" };
+                            actualPayloadSize = plSizeInfo.value; // Store actual size
+                            let currentOffset = cellStart + plSizeInfo.bytesRead;
+                            summary += `Payload Size: ${actualPayloadSize}, `;
 
-                            if ((currentOffset - pageOffset) + 1 > pageSize) return summary + "[Offset exceeds page after reading payload size]"; // Check bounds
+                            if ((currentOffset - pageOffset) + 1 > pageSize) return { summaryText: summary + "[Offset exceeds page]", dumpHtml:"" };
                             const rowIdInfo = readVarint(dataView, currentOffset);
-                            if (rowIdInfo.error) return summary + `[Error reading rowid @${currentOffset-pageOffset}: ${rowIdInfo.error}]`;
+                            if (rowIdInfo.error) return { summaryText: summary + `[Err RowID @${currentOffset-pageOffset}: ${rowIdInfo.error}]`, dumpHtml:"" };
                             summary += `RowID: ${rowIdInfo.value}`;
-                            currentOffset += rowIdInfo.bytesRead; // Update offset
+                            currentOffset += rowIdInfo.bytesRead;
 
-                            const payloadStart = currentOffset;
-                            const payloadBytesOnThisPage = (pageOffset + pageSize) - payloadStart;
+                            payloadStartOffset = currentOffset;
+                            maxBytesOnPageForPayload = (pageOffset + pageSize) - payloadStartOffset;
                             const maxPayloadOnPage = usablePageSize - 35;
                             const minPayloadForOverflow = maxPayloadOnPage + 1;
 
-                            if (payloadSize >= minPayloadForOverflow && payloadBytesOnThisPage >= 4) {
-                                const overflowPageNum = dataView.getUint32(payloadStart, false);
+                            if (actualPayloadSize >= minPayloadForOverflow && maxBytesOnPageForPayload >= 4) {
+                                const overflowPageNum = dataView.getUint32(payloadStartOffset, false);
                                 if (overflowPageNum > 0) {
                                     summary += `, Overflow -> pg ${overflowPageNum}`;
                                     const currentPageData = pageData.find(p => p.pageNum === pageNum);
@@ -220,79 +249,30 @@
                                         currentPageData.links.push({ targetPage: overflowPageNum, type: 'overflow', cellOffset: cellOffsetInPage });
                                     }
                                 } else { summary += `, [Overflow Expected, Ptr=0?]`; }
-                            } else if (payloadSize > 0 && payloadBytesOnThisPage > 0) {
-                                const headerSizeInfo = readVarint(dataView, payloadStart);
-                                if (!headerSizeInfo.error) { summary += `, RecHdrSz: ${headerSizeInfo.value}`; }
-                            }
-                        } // End block scope
+                                initialBytesToDump = Math.min(maxBytesOnPageForPayload, DUMP_LENGTH);
+                            } else if (actualPayloadSize > 0 && maxBytesOnPageForPayload > 0) {
+                                const headerSizeInfo = readVarint(dataView, payloadStartOffset);
+                                if (!headerSizeInfo.error) { summary += `, Record Header Size: ${headerSizeInfo.value}`; }
+                                initialBytesToDump = Math.min(maxBytesOnPageForPayload, actualPayloadSize, DUMP_LENGTH);
+                            } else { maxBytesOnPageForPayload = 0; }
+                        }
                         break;
-
-                    case 'index-leaf': // 0x0A
-                         { // Use block scope
-                            if (bytesAvailable < 1) return summary + "[Too small for payload size]";
+                    case 'index-leaf':
+                         {
+                            if (bytesAvailable < 1) return { summaryText: summary + "[Too small]", dumpHtml:"" };
                             const idxLeafPlSizeInfo = readVarint(dataView, cellStart);
-                            if (idxLeafPlSizeInfo.error) return summary + `[Error reading payload size: ${idxLeafPlSizeInfo.error}]`;
-                            const idxLeafPayloadSize = idxLeafPlSizeInfo.value;
-                            summary += `PayloadSz: ${idxLeafPayloadSize}`;
-                            // **** FIX: Declare currentOffset ****
+                            if (idxLeafPlSizeInfo.error) return { summaryText: summary + `[Err PayloadSz: ${idxLeafPlSizeInfo.error}]`, dumpHtml:"" };
+                            actualPayloadSize = idxLeafPlSizeInfo.value; // Store actual size
+                            summary += `Payload Size: ${actualPayloadSize}`;
                             let currentOffset = cellStart + idxLeafPlSizeInfo.bytesRead;
 
-                            const idxLeafPayloadStart = currentOffset;
-                            summary += `, KeyData @ ${idxLeafPayloadStart - pageOffset}`;
-
-                            // Optional RowID logic removed for simplicity/accuracy without schema
+                            payloadStartOffset = currentOffset;
+                            maxBytesOnPageForPayload = (pageOffset + pageSize) - payloadStartOffset;
+                            summary += `, Key Data @ ${payloadStartOffset - pageOffset}`;
 
                             const idxMaxPayload = usablePageSize - 20;
-                            if (idxLeafPayloadSize >= (idxMaxPayload + 1) && (idxLeafPayloadStart + 4) <= (pageOffset + pageSize)) {
-                                const overflowPageNum = dataView.getUint32(idxLeafPayloadStart, false);
-                                if (overflowPageNum > 0) {
-                                    summary += `, Overflow -> pg ${overflowPageNum}`;
-                                    const currentPageData = pageData.find(p => p.pageNum === pageNum);
-                                    if (currentPageData && !currentPageData.links.some(l => l.targetPage === overflowPageNum && l.type === 'overflow')) {
-                                        currentPageData.links.push({ targetPage: overflowPageNum, type: 'overflow', cellOffset: cellOffsetInPage });
-                                    }
-                                } else { summary += `, [Overflow Expected, Ptr=0?]`; }
-                            }
-                        } // End block scope
-                        break;
-
-                    case 'table-internal': // 0x05
-                        { // Use block scope
-                            if (bytesAvailable < 4) return summary + "[Too small for child ptr]";
-                            const leftChildPtr = dataView.getUint32(cellStart, false);
-                            summary += `LeftChild -> pg ${leftChildPtr}, `;
-                            // **** FIX: Declare currentOffset ****
-                            let currentOffset = cellStart + 4;
-
-                            if ((currentOffset - pageOffset) + 1 > pageSize) return summary + "[Offset exceeds page after reading child ptr]";
-                            const keyRowIdInfo = readVarint(dataView, currentOffset);
-                            if (keyRowIdInfo.error) return summary + `[Error reading key @${currentOffset-pageOffset}: ${keyRowIdInfo.error}]`;
-                            summary += `Key(RowID): ${keyRowIdInfo.value}`;
-                            // currentOffset += keyRowIdInfo.bytesRead; // Update if needed later
-                        } // End block scope
-                        break;
-
-                    case 'index-internal': // 0x02
-                        { // Use block scope
-                            if (bytesAvailable < 4) return summary + "[Too small for child ptr]";
-                            const idxIntChildPtr = dataView.getUint32(cellStart, false);
-                            summary += `LeftChild -> pg ${idxIntChildPtr}, `;
-                             // **** FIX: Declare currentOffset ****
-                            let currentOffset = cellStart + 4;
-
-                            if ((currentOffset - pageOffset) + 1 > pageSize) return summary + "[Offset exceeds page after reading child ptr]";
-                            const idxIntPlSizeInfo = readVarint(dataView, currentOffset);
-                            if (idxIntPlSizeInfo.error) return summary + `[Error reading payload size @${currentOffset-pageOffset}: ${idxIntPlSizeInfo.error}]`;
-                            const idxIntPayloadSize = idxIntPlSizeInfo.value;
-                            summary += `PayloadSz: ${idxIntPayloadSize}`;
-                            currentOffset += idxIntPlSizeInfo.bytesRead; // Update offset
-
-                            const idxIntPayloadStart = currentOffset;
-                            summary += `, KeyData @ ${idxIntPayloadStart - pageOffset}`;
-
-                            const idxIntMaxPayload = usablePageSize - 25;
-                            if (idxIntPayloadSize >= (idxIntMaxPayload + 1) && (idxIntPayloadStart + 4) <= (pageOffset + pageSize)) {
-                                const overflowPageNum = dataView.getUint32(idxIntPayloadStart, false);
+                             if (actualPayloadSize >= (idxMaxPayload + 1) && maxBytesOnPageForPayload >= 4) {
+                                const overflowPageNum = dataView.getUint32(payloadStartOffset, false);
                                 if (overflowPageNum > 0) {
                                     summary += `, Overflow -> pg ${overflowPageNum}`;
                                      const currentPageData = pageData.find(p => p.pageNum === pageNum);
@@ -300,26 +280,139 @@
                                          currentPageData.links.push({ targetPage: overflowPageNum, type: 'overflow', cellOffset: cellOffsetInPage });
                                      }
                                 } else { summary += `, [Overflow Expected, Ptr=0?]`; }
+                                initialBytesToDump = Math.min(maxBytesOnPageForPayload, DUMP_LENGTH);
+                            } else {
+                                 initialBytesToDump = Math.min(maxBytesOnPageForPayload, actualPayloadSize, DUMP_LENGTH);
                             }
-                        } // End block scope
+                        }
                         break;
+                    case 'table-internal':
+                        {
+                            if (bytesAvailable < 4) return { summaryText: summary + "[Too small]", dumpHtml:"" };
+                            const leftChildPtr = dataView.getUint32(cellStart, false);
+                            summary += `Left Child -> pg ${leftChildPtr}, `;
+                            let currentOffset = cellStart + 4;
 
+                            if ((currentOffset - pageOffset) + 1 > pageSize) return { summaryText: summary + "[Offset exceeds page]", dumpHtml:"" };
+                            const keyRowIdInfo = readVarint(dataView, currentOffset);
+                            if (keyRowIdInfo.error) return { summaryText: summary + `[Err Key @${currentOffset-pageOffset}: ${keyRowIdInfo.error}]`, dumpHtml:"" };
+                            summary += `Key (RowID): ${keyRowIdInfo.value}`;
+                            payloadStartOffset = currentOffset;
+                            maxBytesOnPageForPayload = keyRowIdInfo.bytesRead;
+                            initialBytesToDump = maxBytesOnPageForPayload; // Show full varint key
+                        }
+                        break;
+                    case 'index-internal':
+                        {
+                             if (bytesAvailable < 4) return { summaryText: summary + "[Too small]", dumpHtml:"" };
+                            const idxIntChildPtr = dataView.getUint32(cellStart, false);
+                            summary += `Left Child -> pg ${idxIntChildPtr}, `;
+                            let currentOffset = cellStart + 4;
+
+                            if ((currentOffset - pageOffset) + 1 > pageSize) return { summaryText: summary + "[Offset exceeds page]", dumpHtml:"" };
+                            const idxIntPlSizeInfo = readVarint(dataView, currentOffset);
+                            if (idxIntPlSizeInfo.error) return { summaryText: summary + `[Err PayloadSz @${currentOffset-pageOffset}: ${idxIntPlSizeInfo.error}]`, dumpHtml:"" };
+                            actualPayloadSize = idxIntPlSizeInfo.value; // Store actual size
+                            summary += `Payload Size: ${actualPayloadSize}`;
+                            currentOffset += idxIntPlSizeInfo.bytesRead;
+
+                            payloadStartOffset = currentOffset;
+                            maxBytesOnPageForPayload = (pageOffset + pageSize) - payloadStartOffset;
+                            summary += `, Key Data @ ${payloadStartOffset - pageOffset}`;
+
+                            const idxIntMaxPayload = usablePageSize - 25;
+                            if (actualPayloadSize >= (idxIntMaxPayload + 1) && maxBytesOnPageForPayload >= 4) {
+                                const overflowPageNum = dataView.getUint32(payloadStartOffset, false);
+                                if (overflowPageNum > 0) {
+                                    summary += `, Overflow -> pg ${overflowPageNum}`;
+                                     const currentPageData = pageData.find(p => p.pageNum === pageNum);
+                                     if (currentPageData && !currentPageData.links.some(l => l.targetPage === overflowPageNum && l.type === 'overflow')) {
+                                         currentPageData.links.push({ targetPage: overflowPageNum, type: 'overflow', cellOffset: cellOffsetInPage });
+                                     }
+                                } else { summary += `, [Overflow Expected, Ptr=0?]`; }
+                                initialBytesToDump = Math.min(maxBytesOnPageForPayload, DUMP_LENGTH);
+                            } else {
+                                initialBytesToDump = Math.min(maxBytesOnPageForPayload, actualPayloadSize, DUMP_LENGTH);
+                            }
+                        }
+                        break;
                     default:
                         summary += `[Raw Data - Type ${pageType} cell format not decoded]`;
+                        payloadStartOffset = cellStart;
+                        maxBytesOnPageForPayload = bytesAvailable;
+                        initialBytesToDump = Math.min(bytesAvailable, DUMP_LENGTH);
                 }
+
+                // --- Generate Dump HTML ---
+                initialBytesToDump = Math.max(0, initialBytesToDump);
+                maxBytesOnPageForPayload = Math.max(0, maxBytesOnPageForPayload);
+
+                if (initialBytesToDump > 0) {
+                    const initialDump = formatHexAsciiDump(dataView, payloadStartOffset, initialBytesToDump);
+                    // Wrap initial dump in its container
+                    dataDumpHtml += `<div id="${dumpContainerId}" class="dump-content-container">${initialDump}</div>`;
+                    // Add button *if* there's more to show
+                    if (maxBytesOnPageForPayload > initialBytesToDump) {
+                         dataDumpHtml += `<button class="show-more-btn" data-target-id="${dumpContainerId}" data-start-offset="${payloadStartOffset}" data-max-bytes="${maxBytesOnPageForPayload}">Show All (${maxBytesOnPageForPayload} bytes on page)</button>`;
+                    }
+                } else {
+                    dataDumpHtml = `<div class="data-dump">[No data to dump for this cell]</div>`;
+                }
+
             } catch (e) {
-                console.error(`Error parsing cell at offset ${cellOffsetInPage} on page ${pageNum} (Type ${pageType}):`, e);
-                summary += ` [Exception during parsing: ${e.message}]`;
+                console.error(`Error parsing cell ${cellIndex} at offset ${cellOffsetInPage} on page ${pageNum} (Type ${pageType}):`, e);
+                summary += ` [Exception: ${e.message}]`;
             }
-            return summary;
+            // Return structured object
+            return { summaryText: summary, dumpHtml: dataDumpHtml };
+        } // End parseCellSummary
+
+
+        // --- Handle "Show More" Clicks ---
+        function handleShowMoreClick(event) {
+            const button = event.target;
+            const targetId = button.dataset.targetId;
+            const startOffset = parseInt(button.dataset.startOffset, 10);
+            const maxBytes = parseInt(button.dataset.maxBytes, 10);
+
+            if (isNaN(startOffset) || isNaN(maxBytes) || !targetId) {
+                console.error("Invalid data attributes on 'Show More' button:", button.dataset); return;
+            }
+            const dumpContainer = document.getElementById(targetId);
+            if (!dumpContainer) { console.error("Could not find dump container with ID:", targetId); return; }
+            if (!fileBuffer) {
+                 console.error("File buffer is not available.");
+                 dumpContainer.innerHTML = `<div class="data-dump">[Error: File data unavailable]</div>`; return;
+            }
+
+            try {
+                console.log(`Expanding dump for ${targetId}: Offset=${startOffset}, MaxBytes=${maxBytes}`);
+                const dataView = new DataView(fileBuffer);
+                const fullDumpHtml = formatHexAsciiDump(dataView, startOffset, maxBytes);
+                dumpContainer.innerHTML = fullDumpHtml; // Replace content
+                button.style.display = 'none'; // Hide button
+            } catch (error) {
+                 console.error(`Error generating full dump for ${targetId}:`, error);
+                 dumpContainer.innerHTML = `<div class="data-dump">[Error generating full dump: ${error.message}]</div>`;
+                 button.style.display = 'none';
+            }
         }
+
+        // --- Attach Event Listener for Show More ---
+        // Use event delegation on the parent container
+        detailOutputDiv.addEventListener('click', function(event) {
+            if (event.target && event.target.classList.contains('show-more-btn')) {
+                handleShowMoreClick(event);
+            }
+        });
 
 
         // --- File Handling and Parsing ---
         function handleFileSelect(event) {
-            const file = event.target.files[0];
+             // (Unchanged from previous version)
+             const file = event.target.files[0];
             if (!file) return;
-            resetUIAndData(); // Clear everything before processing new file
+            resetUIAndData();
             headerOutput.textContent = 'Reading file...';
 
             const reader = new FileReader();
@@ -332,14 +425,20 @@
                      return;
                 }
                 try {
-                    parseSqliteFile(fileBuffer); // Parse header and all pages
-                    renderHeaderInfo(); // Display file header info
-                    renderPageMap();    // Draw the page boxes
-                    renderLinks();      // Draw the links between boxes
+                    console.log("Starting parseSqliteFile...");
+                    parseSqliteFile(fileBuffer);
+                    console.log("Finished parseSqliteFile. Starting rendering...");
+                    renderHeaderInfo(); console.log("Finished renderHeaderInfo.");
+                    renderPageMap(); console.log("Finished renderPageMap.");
+                    renderLinks(); console.log("Finished renderLinks.");
                     detailOutputDiv.innerHTML = '<pre>File loaded successfully. Click a page in the map above for details.</pre>';
+                    console.log("UI updated for successful load.");
                 } catch (error) {
-                    console.error("Parsing error caught in onload:", error);
-                    headerOutput.textContent = `Error parsing file: ${error.message}\nSee console for details.`;
+                    console.error("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
+                    console.error("!!! Critical Error caught in onload:", error);
+                    console.error("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
+                    headerOutput.textContent = `Error processing file: ${error.message}\nSee console for details.`;
+                    pageMapDiv.innerHTML = ''; linkOverlay.innerHTML = '';
                     detailOutputDiv.innerHTML = `<pre>Error: ${error.message}</pre>`;
                 }
             };
@@ -352,363 +451,74 @@
         }
 
         function resetUIAndData() {
+            // (Unchanged from previous version)
              headerOutput.textContent = 'Upload a SQLite file to begin...';
-             pageMapDiv.innerHTML = '';
-             linkOverlay.innerHTML = '';
+             pageMapDiv.innerHTML = ''; linkOverlay.innerHTML = '';
              detailOutputDiv.innerHTML = '<pre>Click on a page in the map above...</pre>';
-             pageData = [];
-             fileHeaderInfo = {};
-             pageSize = 0;
-             fileBuffer = null;
-             console.clear(); // Clear console for new file logs
+             pageData = []; fileHeaderInfo = {}; pageSize = 0; fileBuffer = null;
+             console.clear();
         }
 
-
         function parseSqliteFile(buffer) {
-            pageData = [];
-            fileHeaderInfo = {};
-            const dataView = new DataView(buffer);
-            const numPagesActual = buffer.byteLength >= 100 ? Math.floor(buffer.byteLength / dataView.getUint16(16, false)) : 0; // Pre-calc tentative page size
-
-
-            // --- 1. Parse File Header (Bytes 0-99) ---
-            console.group("Parsing File Header"); // Group console logs
-            console.log("Attempting to read first 16 bytes for magic string...");
-            const expectedMagic = "SQLite format 3\0";
-            let actualMagic = "";
-            let actualBytesHex = [];
-            try {
+            // (Unchanged from previous version - contains header parsing, page loop, freelist, overflow logic)
+             pageData = []; fileHeaderInfo = {}; const dataView = new DataView(buffer);
+            console.group("Parsing File Header");
+            const expectedMagic = "SQLite format 3\0"; let actualMagic = ""; let actualBytesHex = [];
+            try { /* Magic string check */
                 if (buffer.byteLength < 16) throw new Error(`File buffer too small (${buffer.byteLength} bytes)`);
-                for (let i = 0; i < 16; i++) {
-                    const byte = dataView.getUint8(i);
-                    actualBytesHex.push(byte.toString(16).padStart(2, '0'));
-                    actualMagic += String.fromCharCode(byte);
-                }
-                console.log("First 16 bytes (hex):", actualBytesHex.join(' '));
-                console.log("String constructed:", JSON.stringify(actualMagic));
-                console.log("Expected string   :", JSON.stringify(expectedMagic));
-                console.log("Match?", actualMagic === expectedMagic);
-            } catch (e) {
-                console.error("Error reading first 16 bytes:", e);
-                console.groupEnd();
-                throw new Error(`Failed to read file header bytes. Original error: ${e.message}`);
-            }
-
-            if (actualMagic !== expectedMagic) {
-                 console.error(`Magic string mismatch.`);
-                 console.groupEnd();
-                 throw new Error(`Not a valid SQLite 3 file. Header check failed.`);
-            } else {
-                console.log("Magic string check PASSED.");
-            }
-
-            pageSize = dataView.getUint16(16, false); // Big-Endian
-            if (pageSize === 1) pageSize = 65536;
-            if (pageSize === 0 || pageSize < 512 || pageSize > 65536 || (pageSize & (pageSize - 1)) !== 0) {
-                 console.error(`Invalid page size: ${pageSize}`);
-                 console.groupEnd();
-                 throw new Error(`Invalid page size ${pageSize} found in header.`);
-            }
+                for (let i = 0; i < 16; i++) { const byte = dataView.getUint8(i); actualBytesHex.push(byte.toString(16).padStart(2, '0')); actualMagic += String.fromCharCode(byte); }
+                console.log("First 16 bytes (hex):", actualBytesHex.join(' ')); console.log("String constructed:", JSON.stringify(actualMagic)); console.log("Expected string   :", JSON.stringify(expectedMagic)); console.log("Match?", actualMagic === expectedMagic);
+            } catch (e) { console.error("Error reading first 16 bytes:", e); console.groupEnd(); throw new Error(`Failed to read file header bytes. Original error: ${e.message}`); }
+            if (actualMagic !== expectedMagic) { console.error(`Magic string mismatch.`); console.groupEnd(); throw new Error(`Not a valid SQLite 3 file. Header check failed.`); } else { console.log("Magic string check PASSED."); }
+            pageSize = dataView.getUint16(16, false); if (pageSize === 1) pageSize = 65536;
+            if (pageSize === 0 || pageSize < 512 || pageSize > 65536 || (pageSize & (pageSize - 1)) !== 0) { console.error(`Invalid page size: ${pageSize}`); console.groupEnd(); throw new Error(`Invalid page size ${pageSize} found in header.`); }
             console.log(`Page Size: ${pageSize}`);
-
-            fileHeaderInfo = {
-                magic: actualMagic, pageSize,
-                writeVersion: dataView.getUint8(18), readVersion: dataView.getUint8(19),
-                reservedSpace: dataView.getUint8(20),
-                maxPayloadFrac: dataView.getUint8(21), minPayloadFrac: dataView.getUint8(22), leafPayloadFrac: dataView.getUint8(23),
-                fileChangeCounter: dataView.getUint32(24, false),
-                headerDbSizeInPages: dataView.getUint32(28, false),
-                firstFreelistPage: dataView.getUint32(32, false),
-                totalFreelistPages: dataView.getUint32(36, false),
-                schemaCookie: dataView.getUint32(40, false),
-                schemaFormat: dataView.getUint32(44, false),
-                defaultPageCacheSize: dataView.getUint32(48, false),
-                largestRootPage: dataView.getUint32(52, false),
-                textEncoding: dataView.getUint32(56, false),
-                userVersion: dataView.getUint32(60, false),
-                incrementalVacuumMode: dataView.getUint32(64, false),
-                appId: dataView.getUint32(68, false),
-                versionValidFor: dataView.getUint32(92, false),
-                sqliteVersionNum: dataView.getUint32(96, false)
-            };
-
-            const numPages = Math.floor(buffer.byteLength / pageSize);
-            fileHeaderInfo.calculatedDbSizeInPages = numPages;
-            if(fileHeaderInfo.headerDbSizeInPages > 0 && fileHeaderInfo.headerDbSizeInPages !== numPages) {
-                console.warn(`Header DB size (${fileHeaderInfo.headerDbSizeInPages}) differs from calculated size (${numPages}). Using calculated size.`);
-            } else if (fileHeaderInfo.headerDbSizeInPages === 0) {
-                 console.log(`Header DB size is 0, using calculated size: ${numPages}`);
-            }
-            console.log(`Calculated Page Count: ${numPages}`);
-            console.groupEnd(); // End Header Parsing group
-
-            // Add pseudo entry for header details
+            fileHeaderInfo = { magic: actualMagic, pageSize, writeVersion: dataView.getUint8(18), readVersion: dataView.getUint8(19), reservedSpace: dataView.getUint8(20), maxPayloadFrac: dataView.getUint8(21), minPayloadFrac: dataView.getUint8(22), leafPayloadFrac: dataView.getUint8(23), fileChangeCounter: dataView.getUint32(24, false), headerDbSizeInPages: dataView.getUint32(28, false), firstFreelistPage: dataView.getUint32(32, false), totalFreelistPages: dataView.getUint32(36, false), schemaCookie: dataView.getUint32(40, false), schemaFormat: dataView.getUint32(44, false), defaultPageCacheSize: dataView.getUint32(48, false), largestRootPage: dataView.getUint32(52, false), textEncoding: dataView.getUint32(56, false), userVersion: dataView.getUint32(60, false), incrementalVacuumMode: dataView.getUint32(64, false), appId: dataView.getUint32(68, false), versionValidFor: dataView.getUint32(92, false), sqliteVersionNum: dataView.getUint32(96, false) };
+            const numPages = Math.floor(buffer.byteLength / pageSize); fileHeaderInfo.calculatedDbSizeInPages = numPages;
+            if(fileHeaderInfo.headerDbSizeInPages > 0 && fileHeaderInfo.headerDbSizeInPages !== numPages) { console.warn(`Header DB size (${fileHeaderInfo.headerDbSizeInPages}) differs from calculated size (${numPages}). Using calculated size.`); } else if (fileHeaderInfo.headerDbSizeInPages === 0) { console.log(`Header DB size is 0, using calculated size: ${numPages}`); }
+            console.log(`Calculated Page Count: ${numPages}`); console.groupEnd();
             pageData.push({ pageNum: 0, type: 'file-header', headerInfo: fileHeaderInfo });
-
-             // --- 2. Iterate Through Actual Pages ---
-             console.groupCollapsed("Parsing Individual Pages"); // Start collapsed group for page details
-             for (let i = 1; i <= numPages; i++) {
-                 const pageOffset = (i - 1) * pageSize;
-                 let pageHeaderOffset = (i === 1) ? 100 : 0; // Skip file header on page 1
-                 const headerBase = pageOffset + pageHeaderOffset; // Start of the page header *within* the page data
-
-                 if (headerBase >= buffer.byteLength) {
-                     console.error(`Page ${i}: Calculated offset ${pageOffset} + header offset ${pageHeaderOffset} exceeds buffer length ${buffer.byteLength}. Stopping.`);
-                     break;
-                 }
-
-                 const pageTypeFlag = dataView.getUint8(headerBase);
-                 let pageType = 'unknown';
-                 let pageHeaderSize = 8; // Default for leaves
-
-                 // Determine B-tree type and header size
-                 switch (pageTypeFlag) {
-                    case 0x02: pageType = 'index-internal'; pageHeaderSize = 12; break;
-                    case 0x05: pageType = 'table-internal'; pageHeaderSize = 12; break;
-                    case 0x0a: pageType = 'index-leaf'; pageHeaderSize = 8; break;
-                    case 0x0d: pageType = 'table-leaf'; pageHeaderSize = 8; break;
-                 }
-
-                 let pageInfo = {
-                    pageNum: i, type: pageType, links: [], header: {},
-                    rawOffset: pageOffset, pageHeaderSize: pageHeaderSize, cellOffsets: []
-                 };
-
-                 // Parse B-tree page header if applicable
-                 if (pageType !== 'unknown') {
-                    if (headerBase + pageHeaderSize > buffer.byteLength) {
-                         console.warn(`Page ${i}: Not enough space for ${pageType} header (needs ${pageHeaderSize} bytes). Skipping detailed header parse.`);
-                         pageInfo.header.error = "Header truncated";
-                    } else {
-                         pageInfo.header = {
-                             flag: pageTypeFlag,
-                             firstFreeblockOffset: dataView.getUint16(headerBase + 1, false),
-                             cellCount: dataView.getUint16(headerBase + 3, false),
-                             cellContentStartOffset: dataView.getUint16(headerBase + 5, false), // Relative to page start
-                             fragmentedFreeBytes: dataView.getUint8(headerBase + 7)
-                         };
-                         if (pageHeaderSize === 12) { // Internal pages have right pointer
-                             pageInfo.header.rightMostPointer = dataView.getUint32(headerBase + 8, false);
-                             const rightPtr = pageInfo.header.rightMostPointer;
-                             if (rightPtr > 0 && rightPtr <= numPages) {
-                                 pageInfo.links.push({ targetPage: rightPtr, type: 'btree-child', detail: 'right-most' });
-                             } else if (rightPtr !== 0) {
-                                 console.warn(`Page ${i}: Invalid right-most pointer ${rightPtr}`);
-                             }
-                         }
-                         if (pageInfo.header.cellContentStartOffset === 0 && pageInfo.header.cellCount > 0) {
-                            // According to format, 0 means 65536 for page size 65536. Set to pageSize for consistency.
-                            pageInfo.header.cellContentStartOffset = pageSize;
-                            console.log(`Page ${i}: Corrected cellContentStartOffset 0 to ${pageSize}`);
-                         }
+            console.groupCollapsed("Parsing Individual Pages");
+            for (let i = 1; i <= numPages; i++) { /* Page loop: Determine type, parse header, parse cell offsets */
+                const pageOffset = (i - 1) * pageSize; let pageHeaderOffset = (i === 1) ? 100 : 0; const headerBase = pageOffset + pageHeaderOffset;
+                if (headerBase >= buffer.byteLength) { console.error(`Page ${i}: Offset exceeds buffer. Stopping.`); break; }
+                const pageTypeFlag = dataView.getUint8(headerBase); let pageType = 'unknown'; let pageHeaderSize = 8;
+                switch (pageTypeFlag) { case 0x02: pageType = 'index-internal'; pageHeaderSize = 12; break; case 0x05: pageType = 'table-internal'; pageHeaderSize = 12; break; case 0x0a: pageType = 'index-leaf'; pageHeaderSize = 8; break; case 0x0d: pageType = 'table-leaf'; pageHeaderSize = 8; break; }
+                let pageInfo = { pageNum: i, type: pageType, links: [], header: {}, rawOffset: pageOffset, pageHeaderSize: pageHeaderSize, cellOffsets: [] };
+                if (pageType !== 'unknown') { /* Parse B-tree header */
+                    if (headerBase + pageHeaderSize > buffer.byteLength) { console.warn(`Page ${i}: Not enough space for ${pageType} header.`); pageInfo.header.error = "Header truncated"; }
+                    else { pageInfo.header = { flag: pageTypeFlag, firstFreeblockOffset: dataView.getUint16(headerBase + 1, false), cellCount: dataView.getUint16(headerBase + 3, false), cellContentStartOffset: dataView.getUint16(headerBase + 5, false), fragmentedFreeBytes: dataView.getUint8(headerBase + 7) };
+                        if (pageHeaderSize === 12) { pageInfo.header.rightMostPointer = dataView.getUint32(headerBase + 8, false); const rightPtr = pageInfo.header.rightMostPointer; if (rightPtr > 0 && rightPtr <= numPages) { pageInfo.links.push({ targetPage: rightPtr, type: 'btree-child', detail: 'right-most' }); } else if (rightPtr !== 0) { console.warn(`Page ${i}: Invalid right-most pointer ${rightPtr}`); } }
+                        if (pageInfo.header.cellContentStartOffset === 0 && pageInfo.header.cellCount > 0) { pageInfo.header.cellContentStartOffset = pageSize; console.log(`Page ${i}: Corrected cellContentStartOffset 0 to ${pageSize}`); }
                     }
-                 } else {
-                     // Assume non-B-tree pages have no standard header we parse here
-                     pageInfo.pageHeaderSize = 0;
-                     pageInfo.header = { flag: pageTypeFlag, note: "Not a B-tree page type" };
-                 }
-
-
-                 // Read Cell Pointer Array for B-tree pages
-                 if (pageInfo.header.cellCount > 0 && pageType !== 'unknown') {
-                     const cellPointerArrayStart = headerBase + pageHeaderSize;
-                     const cellPointerArrayEnd = cellPointerArrayStart + pageInfo.header.cellCount * 2;
-
-                     if (cellPointerArrayEnd > pageOffset + pageSize) {
-                          console.warn(`Page ${i}: Cell pointer array extends beyond page boundary (ends at ${cellPointerArrayEnd - pageOffset}).`);
-                          pageInfo.header.error = (pageInfo.header.error || "") + " Cell pointer array truncated.";
-                     } else {
-                         for (let c = 0; c < pageInfo.header.cellCount; c++) {
-                             const pointerOffset = cellPointerArrayStart + (c * 2);
-                             const cellOffsetInPage = dataView.getUint16(pointerOffset, false); // Relative to page start
-
-                             // Validate offset: Should be after header+pointers and within page bounds
-                             const headerAndPointersEnd = cellPointerArrayEnd - pageOffset; // Relative offset of end of pointers
-                             if (cellOffsetInPage > 0 && // 0 might be valid if it's the only cell? Seems unlikely.
-                                 cellOffsetInPage < pageSize &&
-                                 cellOffsetInPage >= headerAndPointersEnd)
-                             {
-                                pageInfo.cellOffsets.push(cellOffsetInPage);
-                             } else {
-                                console.warn(`Page ${i}: Cell ${c} has invalid offset ${cellOffsetInPage} (Header/Ptrs end at ${headerAndPointersEnd}, PageSz ${pageSize}). Storing 0.`);
-                                pageInfo.cellOffsets.push(0); // Store 0 to indicate error but keep array length
-                             }
-                         }
-                         // Sort offsets for easier processing later (handle 0s - push them back?)
-                         pageInfo.cellOffsets.sort((a, b) => {
-                             if (a === 0 && b === 0) return 0;
-                             if (a === 0) return 1; // Put 0s at the end
-                             if (b === 0) return -1;
-                             return a - b; // Sort valid offsets numerically
-                         });
-                     }
-                 }
-
-                 // Add B-tree child links from Internal Page Cells
-                 if (pageInfo.type === 'table-internal' || pageInfo.type === 'index-internal') {
-                     pageInfo.cellOffsets.forEach((cellOffset, cIdx) => {
-                          // Skip invalid offsets marked as 0
-                         if (cellOffset > 0 && cellOffset + 4 <= pageSize) {
-                             const actualCellOffset = pageOffset + cellOffset;
-                             const leftChildPage = dataView.getUint32(actualCellOffset, false);
-                             if (leftChildPage > 0 && leftChildPage <= numPages) {
-                                  // Avoid duplicating right-most if it's also a left child of last cell (can happen)
-                                  if (!pageInfo.links.some(l => l.targetPage === leftChildPage && l.type === 'btree-child')) {
-                                     pageInfo.links.push({ targetPage: leftChildPage, type: 'btree-child', detail: `cell ${cIdx}` });
-                                  }
-                             } else if (leftChildPage !== 0) {
-                                  console.warn(`Page ${i}, Cell ${cIdx} (Offset ${cellOffset}): Invalid left child pointer ${leftChildPage}`);
-                             }
-                         }
-                     });
-                 }
-
-                pageData.push(pageInfo);
-             } // End page loop
-             console.groupEnd(); // End Page Parsing group
-
-
-            // --- 3. Refine Page Types & Links (Freelist Traversal) ---
-            console.groupCollapsed("Processing Freelist");
-            let freelistPageCount = 0;
-            let currentFreelistTrunk = fileHeaderInfo.firstFreelistPage;
-            let visitedFreelist = new Set();
-
-            while (currentFreelistTrunk > 0 && currentFreelistTrunk <= numPages && !visitedFreelist.has(currentFreelistTrunk)) {
-                 visitedFreelist.add(currentFreelistTrunk);
-                 const flTrunkPage = pageData.find(p => p.pageNum === currentFreelistTrunk);
-                 if (flTrunkPage) {
-                     if (flTrunkPage.type !== 'unknown') {
-                         console.warn(`Page ${currentFreelistTrunk} identified as freelist trunk, but previously typed as ${flTrunkPage.type}. Overwriting.`);
-                     }
-                     flTrunkPage.type = 'freelist-trunk';
-                     flTrunkPage.pageHeaderSize = 0; // No B-tree header
-
-                     const pageOffset = flTrunkPage.rawOffset;
-                     if (pageOffset + 8 > buffer.byteLength) { // Need at least 8 bytes for pointers
-                         console.error(`Freelist Trunk ${currentFreelistTrunk}: Page truncated, cannot read pointers.`);
-                         flTrunkPage.header = { error: "Truncated page" };
-                         break;
-                     }
-                     const nextTrunkPageNum = dataView.getUint32(pageOffset, false);
-                     const numLeaves = dataView.getUint32(pageOffset + 4, false);
-                     flTrunkPage.header = { nextTrunk: nextTrunkPageNum, numLeafPointers: numLeaves };
-
-                     if (nextTrunkPageNum > 0 && nextTrunkPageNum <= numPages) {
-                        flTrunkPage.links.push({targetPage: nextTrunkPageNum, type: 'freelist-next-trunk'});
-                     } else if (nextTrunkPageNum !== 0) {
-                         console.warn(`Freelist Trunk ${currentFreelistTrunk}: Invalid next trunk pointer ${nextTrunkPageNum}`);
-                     }
-                     freelistPageCount++;
-
-                     const leafPointerStartOffset = pageOffset + 8;
-                     const maxLeavesReadable = Math.floor((pageSize - 8) / 4);
-                     const actualNumLeaves = Math.min(numLeaves, maxLeavesReadable);
-                     if (numLeaves > maxLeavesReadable) {
-                         console.warn(`Freelist Trunk ${currentFreelistTrunk}: Header claims ${numLeaves} leaves, but only ${maxLeavesReadable} fit. Reading ${maxLeavesReadable}.`);
-                     }
-
-                     for(let k=0; k < actualNumLeaves; k++) {
-                         const leafPointerOffset = leafPointerStartOffset + (k * 4);
-                         const leafPageNum = dataView.getUint32(leafPointerOffset, false);
-
-                         if (leafPageNum > 0 && leafPageNum <= numPages) {
-                              flTrunkPage.links.push({targetPage: leafPageNum, type: 'freelist-leaf-ptr'});
-                              const flLeafPage = pageData.find(p => p.pageNum === leafPageNum);
-                              if(flLeafPage) {
-                                   if (flLeafPage.type !== 'unknown') {
-                                        console.warn(`Page ${leafPageNum} identified as freelist leaf, but previously typed as ${flLeafPage.type}. Overwriting.`);
-                                   }
-                                   flLeafPage.type = 'freelist-leaf';
-                                   flLeafPage.pageHeaderSize = 0; // No B-tree header
-                                   freelistPageCount++;
-                                   flLeafPage.header = { note: "Contains list of free page numbers" };
-                              } else {
-                                  console.warn(`Freelist Trunk ${currentFreelistTrunk}: Points to non-existent leaf page ${leafPageNum}`);
-                              }
-                         } else if (leafPageNum !== 0) {
-                              console.warn(`Freelist Trunk ${currentFreelistTrunk}: Invalid leaf pointer ${leafPageNum} at index ${k}`);
-                         }
-                     }
-                     currentFreelistTrunk = nextTrunkPageNum;
-                 } else {
-                     console.warn(`Freelist traversal stopped: Could not find page data for page ${currentFreelistTrunk}`);
-                     break;
-                 }
-            }
-            if (visitedFreelist.has(currentFreelistTrunk) && currentFreelistTrunk !== 0) {
-                console.warn("Freelist traversal encountered a cycle.");
-            }
-             console.log(`Identified ${freelistPageCount} freelist pages (trunks+leaves) via traversal.`);
-             if (fileHeaderInfo.totalFreelistPages !== freelistPageCount) {
-                console.warn(`Header reported ${fileHeaderInfo.totalFreelistPages} freelist pages, but traversal found ${freelistPageCount}.`);
-             }
-             fileHeaderInfo.traversedFreelistPageCount = freelistPageCount;
-             console.groupEnd(); // End Freelist group
-
-
-                         // --- 4. Identify Overflow Pages (requires links added during cell parsing) ---
-            console.groupCollapsed("Processing Overflow Pages");
-            let overflowPagesFound = new Set();
-            pageData.forEach(page => {
-                // **** FIX: Check if page and page.links are valid ****
-                if (!page || page.pageNum === 0 || !Array.isArray(page.links)) {
-                    return; // Skip this iteration (e.g., for pseudo-header page 0)
+                } else { pageInfo.pageHeaderSize = 0; pageInfo.header = { flag: pageTypeFlag, note: "Not a B-tree page type" }; }
+                if (pageInfo.header.cellCount > 0 && pageType !== 'unknown') { /* Read Cell Pointers */
+                    const cellPointerArrayStart = headerBase + pageHeaderSize; const cellPointerArrayEnd = cellPointerArrayStart + pageInfo.header.cellCount * 2;
+                    if (cellPointerArrayEnd > pageOffset + pageSize) { console.warn(`Page ${i}: Cell pointer array extends beyond page boundary.`); pageInfo.header.error = (pageInfo.header.error || "") + " Cell pointer array truncated."; }
+                    else { for (let c = 0; c < pageInfo.header.cellCount; c++) { const pointerOffset = cellPointerArrayStart + (c * 2); const cellOffsetInPage = dataView.getUint16(pointerOffset, false); const headerAndPointersEnd = cellPointerArrayEnd - pageOffset; if (cellOffsetInPage > 0 && cellOffsetInPage < pageSize && cellOffsetInPage >= headerAndPointersEnd) { pageInfo.cellOffsets.push(cellOffsetInPage); } else { console.warn(`Page ${i}: Cell ${c} invalid offset ${cellOffsetInPage} (HdrEnd ${headerAndPointersEnd}, PgSz ${pageSize}). Storing 0.`); pageInfo.cellOffsets.push(0); } }
+                        pageInfo.cellOffsets.sort((a, b) => { if (a === 0 && b === 0) return 0; if (a === 0) return 1; if (b === 0) return -1; return a - b; });
+                    }
                 }
-
-                // Now it's safe to filter links
-                page.links.filter(link => link.type === 'overflow').forEach(link => {
-                    const targetPageNum = link.targetPage;
-                    if (targetPageNum > 0 && targetPageNum <= numPages) {
-                         const overflowPage = pageData.find(p => p.pageNum === targetPageNum);
-                         if (overflowPage) {
-                             if (overflowPage.type !== 'unknown' && overflowPage.type !== 'overflow') {
-                                console.warn(`Page ${targetPageNum} identified as overflow, but previously typed as ${overflowPage.type}. Overwriting.`);
-                             } else if (overflowPage.type === 'unknown') {
-                                console.log(`Marking page ${targetPageNum} as overflow (linked from page ${page.pageNum})`);
-                             }
-                              overflowPage.type = 'overflow';
-                              overflowPage.pageHeaderSize = 0; // No B-tree header expected
-
-                              // Overflow pages link to the next overflow page (first 4 bytes)
-                              const ovfPageOffset = overflowPage.rawOffset;
-                              if (ovfPageOffset + 4 <= buffer.byteLength) {
-                                  const nextOverflowPage = dataView.getUint32(ovfPageOffset, false);
-                                  overflowPage.header = { nextOverflowPage: nextOverflowPage }; // Store in header object
-                                  if (nextOverflowPage > 0 && nextOverflowPage <= numPages) {
-                                       // Add link if not already present
-                                       if (!overflowPage.links.some(l => l.targetPage === nextOverflowPage && l.type === 'overflow-next')) {
-                                            overflowPage.links.push({ targetPage: nextOverflowPage, type: 'overflow-next' });
-                                       }
-                                  } else if (nextOverflowPage !== 0) {
-                                       console.warn(`Overflow Page ${targetPageNum}: Invalid next overflow pointer ${nextOverflowPage}`);
-                                  }
-                              } else {
-                                  overflowPage.header = { ...(overflowPage.header || {}), error: "Truncated page (cannot read next ptr)" };
-                              }
-                              overflowPagesFound.add(targetPageNum);
-
-                         } else {
-                             console.warn(`Page ${page.pageNum} links to non-existent overflow page ${targetPageNum}`);
-                         }
-                    }
-                }); // End forEach link
-            }); // End forEach page
-            console.log(`Identified ${overflowPagesFound.size} unique pages as overflow based on links.`);
-            console.groupEnd(); // End Overflow group
-
-
+                if (pageInfo.type === 'table-internal' || pageInfo.type === 'index-internal') { /* Add child links */
+                    pageInfo.cellOffsets.forEach((cellOffset, cIdx) => { if (cellOffset > 0 && cellOffset + 4 <= pageSize) { const actualCellOffset = pageOffset + cellOffset; const leftChildPage = dataView.getUint32(actualCellOffset, false); if (leftChildPage > 0 && leftChildPage <= numPages) { if (!pageInfo.links.some(l => l.targetPage === leftChildPage && l.type === 'btree-child')) { pageInfo.links.push({ targetPage: leftChildPage, type: 'btree-child', detail: `cell ${cIdx}` }); } } else if (leftChildPage !== 0) { console.warn(`Page ${i}, Cell ${cIdx} (Offset ${cellOffset}): Invalid left child pointer ${leftChildPage}`); } } });
+                }
+                pageData.push(pageInfo);
+            } console.groupEnd();
+            console.groupCollapsed("Processing Freelist"); /* Freelist traversal */
+             let freelistPageCount = 0; let currentFreelistTrunk = fileHeaderInfo.firstFreelistPage; let visitedFreelist = new Set();
+            while (currentFreelistTrunk > 0 && currentFreelistTrunk <= numPages && !visitedFreelist.has(currentFreelistTrunk)) { visitedFreelist.add(currentFreelistTrunk); const flTrunkPage = pageData.find(p => p.pageNum === currentFreelistTrunk); if (flTrunkPage) { /* Process trunk page */ if (flTrunkPage.type !== 'unknown') { console.warn(`Page ${currentFreelistTrunk} is freelist trunk, but typed as ${flTrunkPage.type}. Overwriting.`); } flTrunkPage.type = 'freelist-trunk'; flTrunkPage.pageHeaderSize = 0; const pageOffset = flTrunkPage.rawOffset; if (pageOffset + 8 > buffer.byteLength) { console.error(`Freelist Trunk ${currentFreelistTrunk}: Truncated.`); flTrunkPage.header = { error: "Truncated page" }; break; } const nextTrunkPageNum = dataView.getUint32(pageOffset, false); const numLeaves = dataView.getUint32(pageOffset + 4, false); flTrunkPage.header = { nextTrunk: nextTrunkPageNum, numLeafPointers: numLeaves }; if (nextTrunkPageNum > 0 && nextTrunkPageNum <= numPages) { flTrunkPage.links.push({targetPage: nextTrunkPageNum, type: 'freelist-next-trunk'}); } else if (nextTrunkPageNum !== 0) { console.warn(`Freelist Trunk ${currentFreelistTrunk}: Invalid next trunk pointer ${nextTrunkPageNum}`); } freelistPageCount++; const leafPointerStartOffset = pageOffset + 8; const maxLeavesReadable = Math.floor((pageSize - 8) / 4); const actualNumLeaves = Math.min(numLeaves, maxLeavesReadable); if (numLeaves > maxLeavesReadable) { console.warn(`Freelist Trunk ${currentFreelistTrunk}: Header claims ${numLeaves} leaves, only ${maxLeavesReadable} fit.`); } for(let k=0; k < actualNumLeaves; k++) { /* Process leaf pointers */ const leafPointerOffset = leafPointerStartOffset + (k * 4); const leafPageNum = dataView.getUint32(leafPointerOffset, false); if (leafPageNum > 0 && leafPageNum <= numPages) { flTrunkPage.links.push({targetPage: leafPageNum, type: 'freelist-leaf-ptr'}); const flLeafPage = pageData.find(p => p.pageNum === leafPageNum); if(flLeafPage) { if (flLeafPage.type !== 'unknown') { console.warn(`Page ${leafPageNum} is freelist leaf, but typed as ${flLeafPage.type}. Overwriting.`); } flLeafPage.type = 'freelist-leaf'; flLeafPage.pageHeaderSize = 0; freelistPageCount++; flLeafPage.header = { note: "Contains list of free page numbers" }; } else { console.warn(`Freelist Trunk ${currentFreelistTrunk}: Points to non-existent leaf page ${leafPageNum}`); } } else if (leafPageNum !== 0) { console.warn(`Freelist Trunk ${currentFreelistTrunk}: Invalid leaf pointer ${leafPageNum} at index ${k}`); } } currentFreelistTrunk = nextTrunkPageNum; } else { console.warn(`Freelist traversal stopped: Could not find page data for page ${currentFreelistTrunk}`); break; } }
+            if (visitedFreelist.has(currentFreelistTrunk) && currentFreelistTrunk !== 0) { console.warn("Freelist traversal encountered a cycle."); } console.log(`Identified ${freelistPageCount} freelist pages via traversal.`); if (fileHeaderInfo.totalFreelistPages !== freelistPageCount) { console.warn(`Header reported ${fileHeaderInfo.totalFreelistPages} freelist pages, but traversal found ${freelistPageCount}.`); } fileHeaderInfo.traversedFreelistPageCount = freelistPageCount; console.groupEnd();
+            console.groupCollapsed("Processing Overflow Pages"); /* Overflow processing */
+             let overflowPagesFound = new Set(); pageData.forEach(page => { if (!page || page.pageNum === 0 || !Array.isArray(page.links)) { return; } page.links.filter(link => link.type === 'overflow').forEach(link => { const targetPageNum = link.targetPage; if (targetPageNum > 0 && targetPageNum <= numPages) { const overflowPage = pageData.find(p => p.pageNum === targetPageNum); if (overflowPage) { if (overflowPage.type !== 'unknown' && overflowPage.type !== 'overflow') { console.warn(`Page ${targetPageNum} is overflow, but typed as ${overflowPage.type}. Overwriting.`); } else if (overflowPage.type === 'unknown') { console.log(`Marking page ${targetPageNum} as overflow (linked from page ${page.pageNum})`); } overflowPage.type = 'overflow'; overflowPage.pageHeaderSize = 0; const ovfPageOffset = overflowPage.rawOffset; if (ovfPageOffset + 4 <= buffer.byteLength) { const nextOverflowPage = dataView.getUint32(ovfPageOffset, false); overflowPage.header = { ...(overflowPage.header || {}), nextOverflowPage: nextOverflowPage }; if (nextOverflowPage > 0 && nextOverflowPage <= numPages) { if (!overflowPage.links.some(l => l.targetPage === nextOverflowPage && l.type === 'overflow-next')) { overflowPage.links.push({ targetPage: nextOverflowPage, type: 'overflow-next' }); } } else if (nextOverflowPage !== 0) { console.warn(`Overflow Page ${targetPageNum}: Invalid next overflow pointer ${nextOverflowPage}`); } } else { overflowPage.header = { ...(overflowPage.header || {}), error: "Truncated page" }; } overflowPagesFound.add(targetPageNum); } else { console.warn(`Page ${page.pageNum} links to non-existent overflow page ${targetPageNum}`); } } }); }); console.log(`Identified ${overflowPagesFound.size} unique pages as overflow based on links.`); console.groupEnd();
             console.log("Finished Parsing. Final Page Data Structure Ready.");
-            // console.log("Final Page Data:", pageData); // Can be very verbose
-            // console.log("Final File Header Info:", fileHeaderInfo);
-
         } // End parseSqliteFile
 
 
         // --- UI Rendering Functions ---
 
         function renderHeaderInfo() {
-             if (fileHeaderInfo && fileHeaderInfo.pageSize) {
+             // (Unchanged)
+              if (fileHeaderInfo && fileHeaderInfo.pageSize) {
                 let text = `Magic: ${JSON.stringify(fileHeaderInfo.magic)}\n`;
                 text += `Page Size: ${fileHeaderInfo.pageSize} bytes\n`;
                 text += `DB Size (Header/Calculated): ${fileHeaderInfo.headerDbSizeInPages} / ${fileHeaderInfo.calculatedDbSizeInPages} pages\n`;
@@ -729,211 +539,76 @@
         }
 
         function renderPageMap() {
-            pageMapDiv.innerHTML = '';
-            if (!pageData || pageData.length <= 1) return;
-
-            const fragment = document.createDocumentFragment();
-            const actualPages = pageData.filter(p => p.pageNum > 0);
-            const totalPages = actualPages.length;
-            if (totalPages === 0) return;
-
-            const containerWidth = pageMapContainer.clientWidth;
-             // Aim for a reasonable minimum width, but scale down if too many pages
-            let pageWidth = Math.max(3, Math.floor(containerWidth / totalPages * 0.95)); // 3px min
-            pageWidth = Math.min(pageWidth, 60); // 60px max
-            console.log(`Rendering page map: ${totalPages} pages, container ${containerWidth}px, page width ${pageWidth}px`);
-
-            actualPages.forEach(page => {
-                const pageElement = document.createElement('div');
-                pageElement.className = `page page-${page.type.replace(/_/g, '-')}`;
-                pageElement.style.width = `${pageWidth}px`;
-                pageElement.dataset.pageNum = page.pageNum;
-                pageElement.title = `Page ${page.pageNum}: ${page.type}`;
-
-                if (pageWidth > 20 || totalPages < 100) {
-                   pageElement.textContent = page.pageNum;
-                   pageElement.style.lineHeight = `${pageMapContainer.clientHeight}px`;
-                } else {
-                   pageElement.style.lineHeight = 'normal';
-                }
-
-                pageElement.addEventListener('click', (e) => {
-                    document.querySelectorAll('.page.selected').forEach(el => el.classList.remove('selected'));
-                    e.currentTarget.classList.add('selected');
-                    showPageDetail(page.pageNum);
-                });
-                fragment.appendChild(pageElement);
-            });
-            pageMapDiv.appendChild(fragment);
-            pageMapDiv.style.width = `${totalPages * pageWidth}px`; // Set total width for scrolling
+            // (Unchanged)
+             pageMapDiv.innerHTML = ''; if (!pageData || pageData.length <= 1) return; const fragment = document.createDocumentFragment(); const actualPages = pageData.filter(p => p.pageNum > 0); const totalPages = actualPages.length; if (totalPages === 0) return; const containerWidth = pageMapContainer.clientWidth; let pageWidth = Math.max(3, Math.floor(containerWidth / totalPages * 0.95)); pageWidth = Math.min(pageWidth, 60); console.log(`Rendering page map: ${totalPages} pages, container ${containerWidth}px, page width ${pageWidth}px`); actualPages.forEach(page => { const pageElement = document.createElement('div'); pageElement.className = `page page-${page.type.replace(/_/g, '-')}`; pageElement.style.width = `${pageWidth}px`; pageElement.dataset.pageNum = page.pageNum; pageElement.title = `Page ${page.pageNum}: ${page.type}`; if (pageWidth > 20 || totalPages < 100) { pageElement.textContent = page.pageNum; pageElement.style.lineHeight = `${pageMapContainer.clientHeight}px`; } else { pageElement.style.lineHeight = 'normal'; } pageElement.addEventListener('click', (e) => { document.querySelectorAll('.page.selected').forEach(el => el.classList.remove('selected')); e.currentTarget.classList.add('selected'); showPageDetail(page.pageNum); }); fragment.appendChild(pageElement); }); pageMapDiv.appendChild(fragment); pageMapDiv.style.width = `${totalPages * pageWidth}px`;
         }
 
         function renderLinks() {
-            linkOverlay.innerHTML = ''; // Clear previous links
-            const firstPageElement = pageMapDiv.querySelector('.page');
-            if (!firstPageElement) return; // No pages rendered yet
-            const pageWidth = parseFloat(firstPageElement.style.width || '3');
-            if (pageWidth <= 0 || isNaN(pageWidth) || !pageData) return;
-
-            const totalPages = pageData.filter(p => p.pageNum > 0).length;
-            if (totalPages === 0) return;
-
-            const totalMapWidth = totalPages * pageWidth;
-            linkOverlay.setAttribute('width', totalMapWidth);
-            linkOverlay.setAttribute('height', pageMapContainer.clientHeight);
-            linkOverlay.setAttribute('viewBox', `0 0 ${totalMapWidth} ${pageMapContainer.clientHeight}`);
-            console.log(`Rendering links with page width: ${pageWidth}, total map width: ${totalMapWidth}`);
-
-
-             pageData.forEach(page => {
-                 if(page.links && page.pageNum > 0) {
-                    page.links.forEach(link => {
-                        if(link.targetPage > 0 && link.targetPage <= totalPages) {
-                            drawLink(page.pageNum, link.targetPage, pageWidth, link.type, link.detail);
-                        }
-                    });
-                 }
-            });
+            // (Unchanged)
+             linkOverlay.innerHTML = ''; const firstPageElement = pageMapDiv.querySelector('.page'); if (!firstPageElement) return; const pageWidth = parseFloat(firstPageElement.style.width || '3'); if (pageWidth <= 0 || isNaN(pageWidth) || !pageData) return; const totalPages = pageData.filter(p => p.pageNum > 0).length; if (totalPages === 0) return; const totalMapWidth = totalPages * pageWidth; linkOverlay.setAttribute('width', totalMapWidth); linkOverlay.setAttribute('height', pageMapContainer.clientHeight); linkOverlay.setAttribute('viewBox', `0 0 ${totalMapWidth} ${pageMapContainer.clientHeight}`); console.log(`Rendering links with page width: ${pageWidth}, total map width: ${totalMapWidth}`); pageData.forEach(page => { if(page.links && page.pageNum > 0) { page.links.forEach(link => { if(link.targetPage > 0 && link.targetPage <= totalPages) { drawLink(page.pageNum, link.targetPage, pageWidth, link.type, link.detail); } }); } });
         }
 
         function drawLink(sourcePageNum, targetPageNum, pageWidth, linkType, detail = '') {
-            const sourceX = (sourcePageNum - 1 + 0.5) * pageWidth;
-            const targetX = (targetPageNum - 1 + 0.5) * pageWidth;
-            const mapHeight = pageMapContainer.clientHeight;
-
-            // Default vertical positions and color
-            let startY = mapHeight * 0.5;
-            let endY = mapHeight * 0.5;
-            let color = 'rgba(128, 128, 128, 0.6)'; // Grey default
-            let strokeDash = '';
-
-            // Customize based on link type
-            if (linkType === 'btree-child') {
-                 startY = mapHeight * 0.4; endY = mapHeight * 0.7; color = 'rgba(0, 0, 255, 0.6)'; // Blue
-            } else if (linkType === 'overflow' || linkType === 'overflow-next') {
-                 startY = mapHeight * 0.2; endY = mapHeight * 0.8; color = 'rgba(255, 165, 0, 0.7)'; // Orange
-                 if (linkType === 'overflow-next') strokeDash = '4, 2'; // Dashed for overflow continuation
-            } else if (linkType === 'freelist-next-trunk') {
-                 startY = mapHeight * 0.1; endY = mapHeight * 0.1; color = 'rgba(218, 165, 32, 0.8)'; // Goldenrod, near top
-            } else if (linkType === 'freelist-leaf-ptr') {
-                 startY = mapHeight * 0.15; endY = mapHeight * 0.9; color = 'rgba(173, 216, 230, 0.7)'; // Light blue/yellowish, trunk to leaf
-            }
-
-            const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-            line.setAttribute('x1', sourceX);
-            line.setAttribute('y1', startY);
-            line.setAttribute('x2', targetX);
-            line.setAttribute('y2', endY);
-            line.style.stroke = color;
-            line.style.strokeWidth = '1.5';
-            if (strokeDash) line.style.strokeDasharray = strokeDash;
-
-            const title = document.createElementNS('http://www.w3.org/2000/svg', 'title');
-            title.textContent = `Link: ${linkType} from ${sourcePageNum} to ${targetPageNum} ${detail ? '('+detail+')' : ''}`;
-            line.appendChild(title);
-
-            linkOverlay.appendChild(line);
+            // (Unchanged)
+             const sourceX = (sourcePageNum - 1 + 0.5) * pageWidth; const targetX = (targetPageNum - 1 + 0.5) * pageWidth; const mapHeight = pageMapContainer.clientHeight; let startY = mapHeight * 0.5, endY = mapHeight * 0.5; let color = 'rgba(128, 128, 128, 0.6)'; let strokeDash = ''; if (linkType === 'btree-child') { startY = mapHeight * 0.4; endY = mapHeight * 0.7; color = 'rgba(0, 0, 255, 0.6)'; } else if (linkType === 'overflow' || linkType === 'overflow-next') { startY = mapHeight * 0.2; endY = mapHeight * 0.8; color = 'rgba(255, 165, 0, 0.7)'; if (linkType === 'overflow-next') strokeDash = '4, 2'; } else if (linkType === 'freelist-next-trunk') { startY = mapHeight * 0.1; endY = mapHeight * 0.1; color = 'rgba(218, 165, 32, 0.8)'; } else if (linkType === 'freelist-leaf-ptr') { startY = mapHeight * 0.15; endY = mapHeight * 0.9; color = 'rgba(173, 216, 230, 0.7)'; } const line = document.createElementNS('http://www.w3.org/2000/svg', 'line'); line.setAttribute('x1', sourceX); line.setAttribute('y1', startY); line.setAttribute('x2', targetX); line.setAttribute('y2', endY); line.style.stroke = color; line.style.strokeWidth = '1.5'; if (strokeDash) line.style.strokeDasharray = strokeDash; const title = document.createElementNS('http://www.w3.org/2000/svg', 'title'); title.textContent = `Link: ${linkType} from ${sourcePageNum} to ${targetPageNum} ${detail ? '('+detail+')' : ''}`; line.appendChild(title); linkOverlay.appendChild(line);
         }
 
         function showPageDetail(pageNum) {
+            // (Updated to use parseCellSummary output correctly)
             const page = pageData.find(p => p.pageNum === pageNum);
             if (page && fileBuffer) {
                 const dataView = new DataView(fileBuffer);
-                let detailHtml = `<pre>--- Page ${page.pageNum} --- Type: ${page.type} ---\n`;
-                detailHtml += `File Offset: ${page.rawOffset} (0x${page.rawOffset.toString(16)})\n`;
+                let detailLines = []; // Build lines for the pre block
+
+                detailLines.push(`--- Page ${page.pageNum} --- Type: ${page.type} ---`);
+                detailLines.push(`File Offset: ${page.rawOffset} (0x${page.rawOffset.toString(16)})`);
                 const headerSize = page.pageHeaderSize || 0;
-                detailHtml += `Page Header Size: ${headerSize} bytes\n\n`;
+                detailLines.push(`Page Header Size: ${headerSize} bytes\n`);
 
-                 // Space Usage Calculation
-                 let freeSpaceSummary = "";
-                 if(page.type !== 'unknown' && page.type !== 'freelist-trunk' && page.type !== 'freelist-leaf' && page.type !== 'overflow') {
-                     const cellPointerArraySize = (page.header?.cellCount || 0) * 2;
-                     const fileHeaderOnPage1 = (page.pageNum === 1 ? 100 : 0);
-                     const totalHeaderAreaSize = fileHeaderOnPage1 + headerSize + cellPointerArraySize;
-                     let usedCellSpace = 0;
-                     let invalidOffsets = 0;
-                     (page.cellOffsets || []).forEach((offset, index) => {
-                         if (offset === 0) { // Count invalid offsets we stored as 0
-                             invalidOffsets++;
-                             return;
-                         }
-                         let nextOffset = pageSize; // Default to end of page
-                         // Find the next *valid* offset
-                         for(let nextIdx = index + 1; nextIdx < page.cellOffsets.length; nextIdx++) {
-                             if (page.cellOffsets[nextIdx] > 0) {
-                                 nextOffset = page.cellOffsets[nextIdx];
-                                 break;
-                             }
-                         }
-                         // Basic validation: offset must be > 0 and < pageSize
-                         if (offset > 0 && offset < pageSize) {
-                            // nextOffset should be greater than offset, if not, something's wrong
-                            if (nextOffset > offset) {
-                               usedCellSpace += (nextOffset - offset);
-                            } else {
-                                console.warn(`Page ${pageNum} Cell ${index}: Invalid size calculation (offset ${offset}, nextOffset ${nextOffset})`);
-                            }
-                         }
-                     });
-                     const cellContentStart = page.header?.cellContentStartOffset || 0;
-                      // Free space before cell content start = start offset - end of header/pointer area
-                     const freeBeforeContent = cellContentStart > totalHeaderAreaSize ? cellContentStart - totalHeaderAreaSize : 0;
-                     const totalUsedApprox = totalHeaderAreaSize + usedCellSpace;
-                     const estimatedFreeTotal = pageSize - totalUsedApprox;
+                // Space Usage (calculation unchanged)
+                let freeSpaceSummary = "";
+                if(page.type !== 'unknown' && page.type !== 'freelist-trunk' && page.type !== 'freelist-leaf' && page.type !== 'overflow') {
+                     const cellPointerArraySize = (page.header?.cellCount || 0) * 2; const fileHeaderOnPage1 = (page.pageNum === 1 ? 100 : 0); const totalHeaderAreaSize = fileHeaderOnPage1 + headerSize + cellPointerArraySize; let usedCellSpace = 0; let invalidOffsets = 0;
+                     (page.cellOffsets || []).forEach((offset, index) => { if (offset === 0) { invalidOffsets++; return; } let nextOffset = pageSize; for(let nextIdx = index + 1; nextIdx < page.cellOffsets.length; nextIdx++) { if (page.cellOffsets[nextIdx] > 0) { nextOffset = page.cellOffsets[nextIdx]; break; } } if (offset > 0 && offset < pageSize) { if (nextOffset > offset) { usedCellSpace += (nextOffset - offset); } else { console.warn(`Page ${pageNum} Cell ${index}: Invalid size calculation (offset ${offset}, nextOffset ${nextOffset})`); } } });
+                     const cellContentStart = page.header?.cellContentStartOffset || 0; const freeBeforeContent = cellContentStart > totalHeaderAreaSize ? cellContentStart - totalHeaderAreaSize : 0; const totalUsedApprox = totalHeaderAreaSize + usedCellSpace; const estimatedFreeTotal = pageSize - totalUsedApprox;
+                     freeSpaceSummary += `--- Space Usage (Estimates) ---\n`; freeSpaceSummary += `File Header (Pg 1): ${fileHeaderOnPage1} bytes\n`; freeSpaceSummary += `Page Header:        ${headerSize} bytes\n`; freeSpaceSummary += `Cell Pointer Array: ${cellPointerArraySize} bytes (${page.header?.cellCount || 0} pointers)\n`; freeSpaceSummary += `Total Header Area:  ${totalHeaderAreaSize} bytes\n`; freeSpaceSummary += `Cell Content Start Offset: ${cellContentStart}\n`; freeSpaceSummary += `Free Space Before Content: ${freeBeforeContent} bytes\n`; freeSpaceSummary += `Fragmented Bytes (Header): ${page.header?.fragmentedFreeBytes || 0}\n`; freeSpaceSummary += `Total Used Cell Content:   ~${usedCellSpace} bytes (${invalidOffsets} invalid offsets ignored)\n`; freeSpaceSummary += `Total Used (Header+Cells): ~${totalUsedApprox} bytes\n`; freeSpaceSummary += `Total Free (PageSz - Used): ~${estimatedFreeTotal} bytes (~${((estimatedFreeTotal/pageSize)*100).toFixed(1)}%)\n`;
+                } else { freeSpaceSummary += `--- Space Usage ---\n(Not calculated for type: ${page.type})\n`; }
+                detailLines.push(freeSpaceSummary);
 
-                     freeSpaceSummary += `--- Space Usage (Estimates) ---\n`;
-                     freeSpaceSummary += `File Header (Pg 1): ${fileHeaderOnPage1} bytes\n`;
-                     freeSpaceSummary += `Page Header:        ${headerSize} bytes\n`;
-                     freeSpaceSummary += `Cell Pointer Array: ${cellPointerArraySize} bytes (${page.header?.cellCount || 0} pointers)\n`;
-                     freeSpaceSummary += `Total Header Area:  ${totalHeaderAreaSize} bytes\n`;
-                     freeSpaceSummary += `Cell Content Start Offset: ${cellContentStart}\n`;
-                     freeSpaceSummary += `Free Space Before Content: ${freeBeforeContent} bytes\n`;
-                     freeSpaceSummary += `Fragmented Bytes (Header): ${page.header?.fragmentedFreeBytes || 0}\n`;
-                     freeSpaceSummary += `Total Used Cell Content:   ~${usedCellSpace} bytes (${invalidOffsets} invalid offsets ignored)\n`;
-                     freeSpaceSummary += `Total Used (Header+Cells): ~${totalUsedApprox} bytes\n`;
-                     freeSpaceSummary += `Total Free (PageSz - Used): ~${estimatedFreeTotal} bytes (~${((estimatedFreeTotal/pageSize)*100).toFixed(1)}%)\n\n`;
-                } else {
-                    freeSpaceSummary += `--- Space Usage ---\n(Not calculated for type: ${page.type})\n\n`;
-                }
-                detailHtml += freeSpaceSummary;
+                detailLines.push(`--- Parsed Page Header Fields ---`);
+                detailLines.push(JSON.stringify(page.header || {}, null, 2) + '\n');
 
+                detailLines.push(`--- Links Originating From This Page ---`);
+                detailLines.push((page.links && page.links.length > 0) ? `${JSON.stringify(page.links, null, 2)}\n` : `(None identified)\n`);
 
-                detailHtml += `--- Parsed Page Header Fields ---\n`;
-                detailHtml += `${JSON.stringify(page.header || {}, null, 2)}\n\n`;
-
-                detailHtml += `--- Links Originating From This Page ---\n`;
-                detailHtml += (page.links && page.links.length > 0) ? `${JSON.stringify(page.links, null, 2)}\n\n` : `(None identified)\n\n`;
-
-                detailHtml += `--- Cell Summaries (${page.cellOffsets?.length || 0} cells) ---\n`;
+                // --- Process Cell Summaries ---
+                let cellHtmlParts = []; // Collect HTML parts for cells separately
+                cellHtmlParts.push(`--- Cell Summaries (${page.cellOffsets?.length || 0} cells) ---`);
                 if (page.cellOffsets && page.cellOffsets.length > 0) {
-                     // Filter out the invalid 0 offsets before display
                      const validOffsets = page.cellOffsets.filter(offset => offset > 0);
                      if (validOffsets.length !== page.cellOffsets.length) {
-                         detailHtml += `(${page.cellOffsets.length - validOffsets.length} invalid cell offsets omitted)\n`;
+                         cellHtmlParts.push(`(${page.cellOffsets.length - validOffsets.length} invalid cell offsets omitted)`);
                      }
                      if (validOffsets.length > 0) {
                          validOffsets.forEach((offset, index) => {
-                             detailHtml += `[${index}] ` + parseCellSummary(dataView, page.rawOffset, offset, page.type, pageSize, page.pageNum) + '\n';
+                             const cellOutput = parseCellSummary(dataView, page.rawOffset, offset, page.type, pageSize, page.pageNum, index);
+                             // Add summary and dump HTML as separate "lines" for the pre block structure
+                             cellHtmlParts.push(cellOutput.summaryText);
+                             cellHtmlParts.push(cellOutput.dumpHtml); // This contains the div and maybe button
                          });
-                     } else {
-                         detailHtml += `(No valid cell offsets found)\n`;
-                     }
-                } else if (page.header?.cellCount > 0) {
-                    detailHtml += `(Header reports ${page.header.cellCount} cells, but offsets could not be parsed/stored)\n`;
-                } else {
-                    detailHtml += `(No cells applicable or reported for this page type)\n`;
-                }
-                detailHtml += `</pre>`; // End the pre block
+                     } else { cellHtmlParts.push(`(No valid cell offsets found)`); }
+                } else if (page.header?.cellCount > 0) { cellHtmlParts.push(`(Header reports ${page.header.cellCount} cells, but offsets could not be parsed/stored)`); }
+                else { cellHtmlParts.push(`(No cells applicable or reported for this page type)`); }
 
-                detailOutputDiv.innerHTML = detailHtml; // Set innerHTML of the div
+                // Join text lines with newline, then wrap everything (including cell HTML) in <pre>
+                detailOutputDiv.innerHTML = `<pre>${detailLines.join('\n')}\n${cellHtmlParts.join('\n')}</pre>`;
 
-                // Re-render links in the map in case overflow links were added/identified
-                renderLinks();
+                renderLinks(); // Update links in case new overflow links were found
 
             } else {
                 detailOutputDiv.innerHTML = `<pre>Details for page ${pageNum} not found or file buffer missing.</pre>`;
             }
-        }
+        } // End showPageDetail
 
     </script>
 
