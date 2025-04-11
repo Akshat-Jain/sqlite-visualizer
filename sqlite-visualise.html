@@ -1,0 +1,664 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>SQLite Physical Visualizer</title>
+    <meta charset="UTF-8">
+    <style>
+        body { font-family: sans-serif; }
+        #fileInfo { margin-bottom: 15px; border-bottom: 1px solid #ccc; padding-bottom: 10px; }
+        #pageMapContainer {
+            width: 95%;
+            height: 100px; /* Adjust as needed */
+            border: 1px solid #ccc;
+            overflow-x: auto; /* Allow scrolling if many pages */
+            overflow-y: hidden;
+            white-space: nowrap; /* Keep pages in one line */
+            margin-bottom: 20px;
+            position: relative; /* For absolute positioning of links */
+        }
+        .page {
+            display: inline-block;
+            /* width: 10px; Dynamic width is now calculated in JS */
+            height: 100%;
+            border-right: 1px solid #eee;
+            box-sizing: border-box;
+            cursor: pointer;
+            font-size: 8px; /* Tiny page number */
+            text-align: center;
+            vertical-align: top; /* Align boxes at the top */
+            line-height: 100px; /* Center text vertically */
+            position: relative; /* For tooltips maybe */
+            overflow: hidden; /* Hide overflowing text */
+        }
+        .page:hover { border: 1px solid black; z-index: 10; }
+        /* --- Page Type Colors --- */
+        .page-file-header { background-color: #f0f0f0; } /* Page 1 often contains this, but coloring page 1 block */
+        .page-internal-btree { background-color: #87CEEB; } /* Sky Blue - Deprecated Types */
+        .page-table-internal { background-color: #87CEFA; } /* Light Sky Blue (Type 5) */
+        .page-index-internal { background-color: #ADD8E6; } /* Light Blue (Type 2) */
+        .page-table-leaf { background-color: #90EE90; } /* Light Green (Type 13 / 0x0D) */
+        .page-index-leaf { background-color: #98FB98; } /* Pale Green (Type 10 / 0x0A) */
+        .page-overflow { background-color: #FFA07A; } /* Light Salmon */
+        .page-freelist-trunk { background-color: #FFD700; } /* Gold */
+        .page-freelist-leaf { background-color: #FFFFE0; } /* Light Yellow */
+        .page-unknown { background-color: #D3D3D3; } /* Light Grey */
+
+        #pageDetail {
+            border: 1px solid #ccc;
+            padding: 10px;
+            min-height: 100px;
+            white-space: pre-wrap; /* Wrap long lines in details */
+            word-wrap: break-word;
+        }
+        /* SVG for links */
+        #linkOverlay {
+             position: absolute;
+             top: 0;
+             left: 0;
+             width: 100%; /* Needs dynamic adjustment */
+             height: 100%;
+             pointer-events: none; /* Allow clicks to pass through */
+             z-index: 5; /* Below page hover but above pages */
+        }
+        #linkOverlay line {
+            /* stroke: rgba(255, 0, 0, 0.5); */ /* Color set dynamically */
+            stroke-width: 1;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>SQLite Physical Structure Visualizer</h1>
+
+    <input type="file" id="dbFile" accept=".db,.sqlite,.sqlite3">
+
+    <div id="fileInfo">
+        <h2>File Header Info</h2>
+        <pre id="headerOutput">Upload a file...</pre>
+    </div>
+
+    <h2>Page Map</h2>
+    <p>(Scroll horizontally if needed. Colors indicate page type. Click a page for details.)</p>
+    <div id="pageMapContainer">
+        <!-- SVG overlay must be FIRST so pages are drawn on top and clickable -->
+        <svg id="linkOverlay" width="100%" height="100%"></svg>
+        <!-- Container for the actual page divs -->
+        <div id="pageMap"></div>
+    </div>
+
+
+    <div id="pageDetail">
+        <h2>Page Details</h2>
+        <pre id="detailOutput">Click on a page in the map above...</pre>
+    </div>
+
+    <!-- Include D3.js (optional but recommended for better viz) -->
+    <!-- <script src="https://d3js.org/d3.v7.min.js"></script> -->
+
+    <script>
+        const fileInput = document.getElementById('dbFile');
+        const headerOutput = document.getElementById('headerOutput');
+        const pageMapDiv = document.getElementById('pageMap');
+        const pageMapContainer = document.getElementById('pageMapContainer');
+        const detailOutput = document.getElementById('detailOutput');
+        const linkOverlay = document.getElementById('linkOverlay');
+
+        let pageData = []; // Store parsed page info: { pageNum, type, links: [], headerInfo: {}, ... }
+        let pageSize = 0;
+        let fileBuffer = null;
+        let fileHeaderInfo = {}; // Store parsed header info
+
+        fileInput.addEventListener('change', handleFileSelect, false);
+
+        function handleFileSelect(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            // Reset UI
+            headerOutput.textContent = 'Reading file...';
+            pageMapDiv.innerHTML = '';
+            linkOverlay.innerHTML = '';
+            detailOutput.textContent = 'Click on a page in the map above...';
+            pageData = [];
+            fileHeaderInfo = {};
+            pageSize = 0;
+            fileBuffer = null;
+
+
+            const reader = new FileReader();
+
+            reader.onload = function(e) {
+                fileBuffer = e.target.result; // ArrayBuffer
+                console.log(`FileReader onload: Read ${fileBuffer.byteLength} bytes.`); // Log size
+                if (!fileBuffer || fileBuffer.byteLength < 100) { // Add a basic size check
+                     console.error("File buffer seems empty or too small after read.");
+                     headerOutput.textContent = "Error: Failed to read file content or file is too small.";
+                     return; // Stop processing
+                }
+                try {
+                    parseSqliteFile(fileBuffer);
+                    renderPageMap(); // Render map first to calculate widths
+                    renderHeaderInfo(); // Then render header using parsed info
+                    // Render links after map is sized
+                    renderLinks();
+                } catch (error) {
+                    console.error("Parsing error caught in onload:", error);
+                    // Display the specific error message from the exception
+                    headerOutput.textContent = `Error parsing file: ${error.message}`;
+                    // Clear potentially partial UI elements
+                    pageMapDiv.innerHTML = '';
+                    linkOverlay.innerHTML = '';
+                    detailOutput.textContent = `Error: ${error.message}`;
+                }
+            };
+
+            reader.onerror = function(e) {
+                console.error("FileReader error:", e);
+                headerOutput.textContent = "Error reading file.";
+            };
+
+            reader.readAsArrayBuffer(file);
+        }
+
+        function parseSqliteFile(buffer) {
+            pageData = []; // Reset page data
+            fileHeaderInfo = {}; // Reset header info
+            const dataView = new DataView(buffer);
+
+            // --- 1. Parse File Header (First 100 bytes) ---
+            console.log("Attempting to read first 16 bytes for magic string...");
+            const expectedMagic = "SQLite format 3\0";
+            let actualMagic = "";
+            let actualBytesHex = [];
+            try {
+                if (buffer.byteLength < 16) {
+                   throw new Error(`File buffer is too small (${buffer.byteLength} bytes) to contain the 16-byte magic string.`);
+                }
+                for (let i = 0; i < 16; i++) {
+                    const byte = dataView.getUint8(i);
+                    actualBytesHex.push(byte.toString(16).padStart(2, '0')); // Store as hex
+                    actualMagic += String.fromCharCode(byte); // Build the string
+                }
+                console.log("First 16 bytes read (hex):", actualBytesHex.join(' '));
+                // Use JSON.stringify to clearly show null or other non-printable chars
+                console.log("String constructed from bytes:", JSON.stringify(actualMagic));
+                console.log("Expected magic string     :", JSON.stringify(expectedMagic));
+                console.log("Does constructed string match expected?", actualMagic === expectedMagic);
+
+            } catch (e) {
+                 console.error("Error reading first 16 bytes:", e);
+                 // Make the error more specific before re-throwing
+                 throw new Error(`Failed to read the file header bytes. Original error: ${e.message}`);
+            }
+
+            // Original check using the directly constructed string
+            if (actualMagic !== expectedMagic) {
+                 console.error(`Magic string mismatch confirmation. Found: ${JSON.stringify(actualMagic)}, Expected: ${JSON.stringify(expectedMagic)}`);
+                 // Provide more context in the error shown to the user
+                 throw new Error(`Not a valid SQLite 3 file. Header check failed. Expected start: "SQLite format 3\\0"`);
+            } else {
+                console.log("Magic string check PASSED."); // Good sign!
+            }
+
+            // --- Continue parsing the rest of the header ---
+            pageSize = dataView.getUint16(16, false); // Big-Endian (false = Big Endian)
+            if (pageSize === 1) pageSize = 65536; // Special case for 64k pages
+            if (pageSize === 0) throw new Error("Invalid page size 0 found in header.");
+             // Check if page size is a power of 2 and within limits
+             if (pageSize < 512 || pageSize > 65536 || (pageSize & (pageSize - 1)) !== 0) {
+                console.warn(`Unusual page size: ${pageSize}. Should be power of 2 between 512 and 65536.`);
+                // Allow parsing to continue, but log a warning. Could throw an error if stricter.
+             }
+
+            const writeVersion = dataView.getUint8(18);
+            const readVersion = dataView.getUint8(19);
+            const reservedSpace = dataView.getUint8(20);
+            const maxPayloadFrac = dataView.getUint8(21); // Usually 64
+            const minPayloadFrac = dataView.getUint8(22); // Usually 32
+            const leafPayloadFrac = dataView.getUint8(23); // Usually 32
+            const fileChangeCounter = dataView.getUint32(24, false);
+            let dbSizeInPages = dataView.getUint32(28, false); // May be 0 during transaction
+            const firstFreelistPage = dataView.getUint32(32, false);
+            const totalFreelistPages = dataView.getUint32(36, false);
+            const schemaCookie = dataView.getUint32(40, false);
+            const schemaFormat = dataView.getUint32(44, false); // 1, 2, 3, 4
+            const defaultPageCacheSize = dataView.getUint32(48, false);
+            const largestRootPage = dataView.getUint32(52, false); // Usually 0, means autovacuum/incremental mode
+            const textEncoding = dataView.getUint32(56, false); // 1=UTF8, 2=UTF16le, 3=UTF16be
+            const userVersion = dataView.getUint32(60, false);
+            const incrementalVacuumMode = dataView.getUint32(64, false); // Non-zero if incr-vacuum mode
+            const appId = dataView.getUint32(68, false);
+            // Bytes 72-91 reserved
+            const versionValidFor = dataView.getUint32(92, false);
+            const sqliteVersionNum = dataView.getUint32(96, false);
+
+            fileHeaderInfo = {
+                magic: actualMagic, // Use the parsed one
+                pageSize, writeVersion, readVersion, reservedSpace,
+                maxPayloadFrac, minPayloadFrac, leafPayloadFrac, fileChangeCounter,
+                headerDbSizeInPages: dbSizeInPages, // Store header value separately
+                firstFreelistPage, totalFreelistPages, schemaCookie, schemaFormat,
+                defaultPageCacheSize, largestRootPage, textEncoding, userVersion,
+                incrementalVacuumMode, appId, versionValidFor, sqliteVersionNum
+            };
+            // Add pseudo entry for header details, though not a real page
+            pageData.push({ pageNum: 0, type: 'file-header', headerInfo: fileHeaderInfo });
+
+            // Calculate number of pages based on file size, more reliable than header during transactions
+            const numPages = Math.floor(buffer.byteLength / pageSize);
+            console.log(`Calculated page count: ${numPages} (Page Size: ${pageSize}, File Size: ${buffer.byteLength})`);
+            if(dbSizeInPages > 0 && dbSizeInPages !== numPages) {
+                console.warn(`Header DB size (${dbSizeInPages}) differs from calculated size (${numPages}). Using calculated size.`);
+            }
+            // Store the calculated size for consistency
+            fileHeaderInfo.calculatedDbSizeInPages = numPages;
+
+
+             // --- 2. Iterate Through Actual Pages ---
+             for (let i = 1; i <= numPages; i++) {
+                const pageOffset = (i - 1) * pageSize;
+                let pageHeaderOffset = 0; // Offset *within* the page for the page header
+                if (i === 1) pageHeaderOffset = 100; // Skip file header bytes on page 1
+
+                const pageTypeFlag = dataView.getUint8(pageOffset + pageHeaderOffset);
+                let pageType = 'unknown';
+                let pageInfo = {
+                    pageNum: i,
+                    type: 'unknown',
+                    links: [], // { targetPage: number, type: string ('btree-child', 'overflow', 'freelist-trunk', 'freelist-leaf-ptr') }
+                    header: {},
+                    rawOffset: pageOffset,
+                    pageHeaderSize: i === 1 ? 8 : 12 // 8 for non-page-1 B-tree, 12 for page 1 B-tree
+                };
+
+                // Decode page type flag (https://www.sqlite.org/fileformat2.html#btree_pages)
+                switch (pageTypeFlag) {
+                    case 0x02: pageType = 'index-internal'; pageInfo.pageHeaderSize = 12; break; // b-tree internal index page
+                    case 0x05: pageType = 'table-internal'; pageInfo.pageHeaderSize = 12; break; // b-tree internal table page
+                    case 0x0a: pageType = 'index-leaf'; pageInfo.pageHeaderSize = 8; break; // b-tree leaf index page
+                    case 0x0d: pageType = 'table-leaf'; pageInfo.pageHeaderSize = 8; break; // b-tree leaf table page
+                    // Other page types (freelist, overflow, ptrmap) don't have these flags
+                    // They will be identified later by following pointers
+                }
+
+                // Basic B-tree page header parsing
+                // Offsets are relative to the start of the page header (pageOffset + pageHeaderOffset)
+                const headerBase = pageOffset + pageHeaderOffset;
+                const firstFreeblockOffset = dataView.getUint16(headerBase + 1, false); // Offset 1, 2 bytes
+                const cellCount = dataView.getUint16(headerBase + 3, false); // Offset 3, 2 bytes
+                // Offset 5, 2 bytes. Only valid if cellCount > 0. Points relative to page start.
+                const cellContentStartOffset = cellCount > 0 ? dataView.getUint16(headerBase + 5, false) : pageSize;
+                const fragmentedFreeBytes = dataView.getUint8(headerBase + 7); // Offset 7, 1 byte
+
+                pageInfo.type = pageType; // Set the identified B-tree type (or keep 'unknown')
+                pageInfo.header = {
+                     flag: pageTypeFlag,
+                     firstFreeblockOffset, // 0 means no free blocks
+                     cellCount,
+                     cellContentStartOffset, // Start of the contiguous cell content area
+                     fragmentedFreeBytes
+                };
+
+                 // Internal pages (Types 2, 5) have a right-most pointer and different header size
+                 if (pageTypeFlag === 0x02 || pageTypeFlag === 0x05) {
+                    // Right-most pointer is at offset 8, 4 bytes
+                    const rightMostPointer = dataView.getUint32(headerBase + 8, false);
+                    pageInfo.header.rightMostPointer = rightMostPointer;
+                    if (rightMostPointer > 0 && rightMostPointer <= numPages) {
+                        pageInfo.links.push({ targetPage: rightMostPointer, type: 'btree-child' });
+                    } else if (rightMostPointer !== 0) {
+                        console.warn(`Page ${i}: Invalid right-most pointer ${rightMostPointer}`);
+                    }
+                    pageInfo.pageHeaderSize = 12; // Header is 12 bytes for internal pages
+                 } else if (pageTypeFlag === 0x0a || pageTypeFlag === 0x0d) {
+                    pageInfo.pageHeaderSize = 8; // Header is 8 bytes for leaf pages
+                 } else {
+                    // Could be freelist, overflow, or corrupted. Leave size as default guess for now.
+                    pageInfo.pageHeaderSize = 8; // Default guess
+                 }
+
+                // TODO: Parse cell pointer array for internal pages to find child pointers
+                // This starts right after the page header
+                // Each entry is 4 bytes (child page number) for table internal, or 4 bytes (child page) + varint (key size) + key for index internal
+                if (pageInfo.type === 'table-internal') {
+                    const cellPointerArrayOffset = headerBase + 12;
+                    for (let c = 0; c < cellCount; c++) {
+                        const pointerOffset = cellPointerArrayOffset + (c * 2); // Each pointer is 2 bytes offset in array
+                        const cellOffsetInPage = dataView.getUint16(pointerOffset, false);
+                        // In a table internal page, the first 4 bytes of the cell is the left child pointer
+                        const leftChildPage = dataView.getUint32(pageOffset + cellOffsetInPage, false);
+                        if (leftChildPage > 0 && leftChildPage <= numPages) {
+                             pageInfo.links.push({ targetPage: leftChildPage, type: 'btree-child' });
+                        } else if (leftChildPage !== 0) {
+                             console.warn(`Page ${i}, Cell ${c}: Invalid left child pointer ${leftChildPage}`);
+                        }
+                        // Varint for rowid key follows - skipping detailed parsing for now
+                    }
+                } else if (pageInfo.type === 'index-internal') {
+                    const cellPointerArrayOffset = headerBase + 12;
+                     for (let c = 0; c < cellCount; c++) {
+                        const pointerOffset = cellPointerArrayOffset + (c * 2);
+                        const cellOffsetInPage = dataView.getUint16(pointerOffset, false);
+                        // Index internal pages have a different cell format
+                        // First 4 bytes are left child pointer
+                        const leftChildPage = dataView.getUint32(pageOffset + cellOffsetInPage, false);
+                         if (leftChildPage > 0 && leftChildPage <= numPages) {
+                             pageInfo.links.push({ targetPage: leftChildPage, type: 'btree-child' });
+                        } else if (leftChildPage !== 0) {
+                             console.warn(`Page ${i}, Cell ${c}: Invalid left child pointer ${leftChildPage}`);
+                        }
+                        // Key follows, needs varint parsing - skipping for now
+                    }
+                }
+
+                // TODO: Parse leaf page cells to find overflow page pointers
+                // Requires understanding cell formats (varints, serial types, etc.) - COMPLEX!
+                if (pageInfo.type === 'table-leaf' || pageInfo.type === 'index-leaf') {
+                    // Minimal check - look for potential overflow pointers within cell data
+                    // This is a HUGE simplification and likely inaccurate without full cell parsing
+                    // A cell header might contain info about overflow
+                }
+
+
+                pageData.push(pageInfo);
+            } // End page loop
+
+            // --- 3. Refine Page Types & Links (Freelist Traversal) ---
+            let freelistPageCount = 0;
+            let currentFreelistTrunk = firstFreelistPage;
+            let visitedFreelist = new Set(); // Prevent infinite loops
+
+            while (currentFreelistTrunk > 0 && currentFreelistTrunk <= numPages && !visitedFreelist.has(currentFreelistTrunk)) {
+                 visitedFreelist.add(currentFreelistTrunk);
+                 const flTrunkPage = pageData.find(p => p.pageNum === currentFreelistTrunk);
+                 if (flTrunkPage) {
+                     if (flTrunkPage.type !== 'unknown') {
+                         console.warn(`Page ${currentFreelistTrunk} identified as freelist trunk, but previously typed as ${flTrunkPage.type}. Overwriting.`);
+                     }
+                     flTrunkPage.type = 'freelist-trunk';
+                     flTrunkPage.pageHeaderSize = 0; // Freelist pages don't have B-tree headers
+
+                     const pageOffset = flTrunkPage.rawOffset;
+                     const nextTrunkPageNum = dataView.getUint32(pageOffset, false); // Offset 0 in page body
+                     const numLeaves = dataView.getUint32(pageOffset + 4, false); // Offset 4 in page body
+                     flTrunkPage.header = { nextTrunk: nextTrunkPageNum, numLeafPointers: numLeaves }; // Store basic freelist header info
+
+                     if (nextTrunkPageNum > 0 && nextTrunkPageNum <= numPages) {
+                        flTrunkPage.links.push({targetPage: nextTrunkPageNum, type: 'freelist-next-trunk'});
+                     } else if (nextTrunkPageNum !== 0) {
+                         console.warn(`Freelist Trunk ${currentFreelistTrunk}: Invalid next trunk pointer ${nextTrunkPageNum}`);
+                     }
+
+                     freelistPageCount++; // Count the trunk page
+
+                     // Iterate through leaf pointers stored on the trunk page
+                     const leafPointerStartOffset = pageOffset + 8;
+                     for(let k=0; k < numLeaves; k++) {
+                         const leafPointerOffset = leafPointerStartOffset + (k * 4);
+                         if (leafPointerOffset + 4 > pageOffset + pageSize) {
+                             console.warn(`Freelist Trunk ${currentFreelistTrunk}: Trying to read leaf pointer beyond page boundary.`);
+                             break;
+                         }
+                         const leafPageNum = dataView.getUint32(leafPointerOffset, false);
+
+                         if (leafPageNum > 0 && leafPageNum <= numPages) {
+                              flTrunkPage.links.push({targetPage: leafPageNum, type: 'freelist-leaf-ptr'});
+                              const flLeafPage = pageData.find(p => p.pageNum === leafPageNum);
+                              if(flLeafPage) {
+                                   if (flLeafPage.type !== 'unknown') {
+                                        console.warn(`Page ${leafPageNum} identified as freelist leaf, but previously typed as ${flLeafPage.type}. Overwriting.`);
+                                   }
+                                   flLeafPage.type = 'freelist-leaf';
+                                   flLeafPage.pageHeaderSize = 0; // No B-tree header
+                                   freelistPageCount++; // Count the leaf page
+                                   // TODO: Could parse the leaf page to get the actual list of free page numbers it contains
+                                   // The leaf page contains an array of 4-byte page numbers
+                                   const freePageCountOnLeaf = (pageSize / 4); // Simple estimate
+                                   flLeafPage.header = { estimatedFreePagesListed: freePageCountOnLeaf };
+                              } else {
+                                  console.warn(`Freelist Trunk ${currentFreelistTrunk}: Points to non-existent leaf page ${leafPageNum}`);
+                              }
+                         } else if (leafPageNum !== 0) {
+                              console.warn(`Freelist Trunk ${currentFreelistTrunk}: Invalid leaf pointer ${leafPageNum}`);
+                         }
+                     }
+
+                     currentFreelistTrunk = nextTrunkPageNum; // Move to the next trunk page
+                 } else {
+                     console.warn(`Freelist traversal stopped: Could not find page data for page ${currentFreelistTrunk}`);
+                     break; // Invalid page number or data structure issue
+                 }
+             }
+             if (visitedFreelist.has(currentFreelistTrunk) && currentFreelistTrunk !== 0) {
+                 console.warn("Freelist traversal encountered a cycle.");
+             }
+
+             console.log(`Identified ${freelistPageCount} freelist pages (trunks+leaves) via traversal.`);
+             if (totalFreelistPages !== freelistPageCount) {
+                console.warn(`Header reported ${totalFreelistPages} freelist pages, but traversal found ${freelistPageCount}.`);
+             }
+             fileHeaderInfo.traversedFreelistPageCount = freelistPageCount; // Add to header info
+
+             // TODO: Add post-processing for Overflow pages by parsing leaf cells (very complex)
+             // TODO: Add post-processing for Pointer Map pages (if WAL enabled and ptrmap exists)
+
+            console.log("Finished Parsing. Page Data:", pageData);
+            console.log("File Header Info:", fileHeaderInfo);
+        } // End parseSqliteFile
+
+        function renderHeaderInfo() {
+             if (fileHeaderInfo && fileHeaderInfo.pageSize) {
+                let text = `Magic: ${JSON.stringify(fileHeaderInfo.magic)} (SQLite format 3\\0)\n`;
+                text += `Page Size: ${fileHeaderInfo.pageSize} bytes\n`;
+                text += `DB Size (Header/Calculated): ${fileHeaderInfo.headerDbSizeInPages} / ${fileHeaderInfo.calculatedDbSizeInPages} pages\n`;
+                text += `Read/Write Version: ${fileHeaderInfo.readVersion}/${fileHeaderInfo.writeVersion}\n`;
+                text += `Reserved Space Per Page: ${fileHeaderInfo.reservedSpace} bytes\n`;
+                text += `File Change Counter: ${fileHeaderInfo.fileChangeCounter}\n`;
+                text += `Schema Cookie: ${fileHeaderInfo.schemaCookie}\n`;
+                text += `Schema Format: ${fileHeaderInfo.schemaFormat}\n`;
+                text += `Text Encoding: ${fileHeaderInfo.textEncoding === 1 ? 'UTF-8' : fileHeaderInfo.textEncoding === 2 ? 'UTF-16le' : fileHeaderInfo.textEncoding === 3 ? 'UTF-16be' : 'Unknown'}\n`;
+                text += `User Version: ${fileHeaderInfo.userVersion}\n`;
+                text += `SQLite Version Number: ${fileHeaderInfo.sqliteVersionNum}\n`;
+                text += `Freelist Trunk/Total(Header)/Total(Traversed): ${fileHeaderInfo.firstFreelistPage} / ${fileHeaderInfo.totalFreelistPages} / ${fileHeaderInfo.traversedFreelistPageCount}\n`;
+                text += `Incremental Vacuum Mode: ${fileHeaderInfo.incrementalVacuumMode ? 'Yes' : 'No'}\n`;
+                headerOutput.textContent = text;
+             } else if (headerOutput.textContent.startsWith('Error')) {
+                 // Don't overwrite error messages
+             }
+             else {
+                 headerOutput.textContent = "Could not parse header or no file loaded.";
+             }
+        }
+
+        function renderPageMap() {
+            pageMapDiv.innerHTML = ''; // Clear previous map
+
+            if (!pageData || pageData.length <= 1) { // Need more than just the pseudo-header
+                 console.log("RenderPageMap: No page data to render.");
+                 return;
+            }
+
+            const fragment = document.createDocumentFragment();
+            // Exclude the pseudo file-header entry for count/width calc
+            const actualPages = pageData.filter(p => p.pageNum > 0);
+            const totalPages = actualPages.length;
+            if (totalPages === 0) return;
+
+            // Calculate dynamic width - ensure minimum width, adjust based on container
+            const containerWidth = pageMapContainer.clientWidth;
+            let pageWidth = Math.max(2, Math.floor(containerWidth / totalPages));
+             // If pages are too wide, limit them (e.g., for very few pages)
+             pageWidth = Math.min(pageWidth, 50);
+             console.log(`Rendering page map: ${totalPages} pages, container ${containerWidth}px, page width ${pageWidth}px`);
+
+
+            actualPages.forEach(page => {
+                const pageElement = document.createElement('div');
+                pageElement.classList.add('page');
+                // Use refined type for class name
+                const cssClass = `page-${page.type.replace(/_/g, '-')}`; // e.g., page-table-leaf
+                pageElement.classList.add(cssClass);
+                pageElement.style.width = `${pageWidth}px`;
+                pageElement.dataset.pageNum = page.pageNum; // Store page number for click handler
+                pageElement.title = `Page ${page.pageNum}: ${page.type}`; // Tooltip
+
+                 // Only show page numbers if they fit reasonably well
+                 if (pageWidth > 15 || totalPages < 100) {
+                    pageElement.textContent = page.pageNum;
+                    pageElement.style.lineHeight = `${pageMapContainer.clientHeight}px`; // Center vertically
+                 } else {
+                      pageElement.style.lineHeight = 'normal'; // Avoid large line height if no text
+                 }
+
+                pageElement.addEventListener('click', () => {
+                    // Highlight clicked page
+                    document.querySelectorAll('.page.selected').forEach(el => el.classList.remove('selected'));
+                    pageElement.classList.add('selected');
+                    showPageDetail(page.pageNum);
+                });
+                fragment.appendChild(pageElement);
+            });
+
+            pageMapDiv.appendChild(fragment);
+
+            // Adjust container and SVG overlay size based on rendered content
+            const totalMapWidth = totalPages * pageWidth;
+            // Set explicit width on the inner div to make the container scroll correctly
+            pageMapDiv.style.width = `${totalMapWidth}px`;
+
+            linkOverlay.setAttribute('width', totalMapWidth);
+            linkOverlay.setAttribute('height', pageMapContainer.clientHeight);
+            // Adjust viewBox to match the calculated width
+            linkOverlay.setAttribute('viewBox', `0 0 ${totalMapWidth} ${pageMapContainer.clientHeight}`);
+
+        }
+
+        function renderLinks() {
+            linkOverlay.innerHTML = ''; // Clear previous links
+
+             const pageWidth = parseFloat(pageMapDiv.querySelector('.page')?.style.width || '2');
+             if (pageWidth <= 0 || isNaN(pageWidth) || !pageData) return;
+
+            const totalPages = pageData.filter(p => p.pageNum > 0).length;
+            if (totalPages === 0) return;
+
+            console.log(`Rendering links with page width: ${pageWidth}`);
+
+             pageData.forEach(page => {
+                 if(page.links && page.pageNum > 0) { // Only draw links from actual pages
+                    page.links.forEach(link => {
+                        // Ensure target is a valid page number
+                        if(link.targetPage > 0 && link.targetPage <= totalPages) {
+                            drawLink(page.pageNum, link.targetPage, pageWidth, link.type);
+                        } else if (link.targetPage !== 0) {
+                            // Log invalid links originating from valid pages
+                            console.warn(`Link from page ${page.pageNum} to invalid page ${link.targetPage} of type ${link.type}`);
+                        }
+                    });
+                 }
+            });
+        }
+
+
+         function drawLink(sourcePageNum, targetPageNum, pageWidth, linkType) {
+            // Calculate center X coordinates for the source and target pages
+            const sourceX = (sourcePageNum - 1 + 0.5) * pageWidth;
+            const targetX = (targetPageNum - 1 + 0.5) * pageWidth;
+
+            // Draw lines slightly offset vertically to avoid overlap
+            let startY = pageMapContainer.clientHeight * 0.3; // Start near top
+            let endY = pageMapContainer.clientHeight * 0.7; // End near bottom
+            let color = 'red'; // Default for unknown/other links
+
+            // Adjust Y and color based on type for clarity
+            if (linkType === 'btree-child') {
+                 startY = pageMapContainer.clientHeight * 0.4;
+                 endY = pageMapContainer.clientHeight * 0.6;
+                 color = 'rgba(0, 0, 255, 0.6)'; // Blueish
+            } else if (linkType === 'overflow') {
+                 startY = pageMapContainer.clientHeight * 0.2;
+                 endY = pageMapContainer.clientHeight * 0.8;
+                 color = 'rgba(255, 165, 0, 0.6)'; // Orangeish
+            } else if (linkType === 'freelist-next-trunk') {
+                 startY = pageMapContainer.clientHeight * 0.1;
+                 endY = pageMapContainer.clientHeight * 0.1; // Horizontal link near top
+                 color = 'rgba(218, 165, 32, 0.7)'; // Goldenrod
+            } else if (linkType === 'freelist-leaf-ptr') {
+                 startY = pageMapContainer.clientHeight * 0.15; // From trunk
+                 endY = pageMapContainer.clientHeight * 0.85; // To leaf (usually lower page num)
+                 color = 'rgba(255, 255, 0, 0.6)'; // Yellowish
+            }
+
+            // Simple straight line for now
+            // Could use arcs or curves for better visibility (needs SVG path)
+            const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+            line.setAttribute('x1', sourceX);
+            line.setAttribute('y1', startY);
+            line.setAttribute('x2', targetX);
+            line.setAttribute('y2', endY);
+            line.style.stroke = color;
+            line.style.strokeWidth = '1';
+            // line.style.opacity = '0.6'; // Already incorporated in rgba colors
+
+            // Add a title for hover info on the link (might be hard to hit)
+             line.innerHTML = `<title>Link: ${linkType} from ${sourcePageNum} to ${targetPageNum}</title>`;
+
+            linkOverlay.appendChild(line);
+        }
+
+        function showPageDetail(pageNum) {
+            const page = pageData.find(p => p.pageNum === pageNum);
+            if (page) {
+                let detailText = `--- Page ${page.pageNum} ---\n`;
+                detailText += `Type: ${page.type}\n`;
+                detailText += `File Offset: ${page.rawOffset} (0x${page.rawOffset.toString(16)})\n`;
+                detailText += `Page Header Size: ${page.pageHeaderSize} bytes\n\n`;
+
+                detailText += `Parsed Header Fields:\n`;
+                detailText += `${JSON.stringify(page.header || {}, null, 2)}\n\n`;
+
+                detailText += `Links Originating From This Page:\n`;
+                 if (page.links && page.links.length > 0) {
+                    detailText += `${JSON.stringify(page.links, null, 2)}`;
+                 } else {
+                     detailText += `(None identified)`;
+                 }
+
+                // TODO: Add visualization/summary of page internal structure (cells, free space)
+                // This requires more detailed parsing within parseSqliteFile or a dedicated function here
+                // e.g., calculate free space: page.header.cellContentStartOffset - (page.rawOffset + page.pageHeaderSize + page.header.cellCount * 2)
+                // or follow the firstFreeblockOffset chain.
+
+                detailOutput.textContent = detailText;
+            } else {
+                detailOutput.textContent = `Details for page ${pageNum} not found in parsed data.`;
+            }
+        }
+
+        // Helper function to read null-terminated string (simple version - cautious usage)
+        // Note: This was primarily for the magic string, which is fixed length.
+        // Reading other strings in SQLite often requires knowing the encoding and length explicitly.
+        function readString(dataView, offset, maxLength) {
+             let str = "";
+             try {
+                 for (let i = 0; i < maxLength; i++) {
+                     // Check bounds to prevent reading past the end of the DataView
+                     if (offset + i >= dataView.byteLength) {
+                         console.warn(`readString: Attempted to read past buffer end at offset ${offset + i}`);
+                         break;
+                     }
+                     const charCode = dataView.getUint8(offset + i);
+                     if (charCode === 0) break; // Null terminator
+                     str += String.fromCharCode(charCode);
+                 }
+             } catch (e) {
+                 console.error(`Error in readString at offset ${offset}, length ${maxLength}: ${e}`);
+                 return "[Error Reading String]";
+             }
+             return str;
+        }
+
+    </script>
+
+</body>
+</html>
